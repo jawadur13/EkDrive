@@ -1,28 +1,52 @@
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db/client';
+import { google } from 'googleapis';
 import { checkDriveHealth } from '../services/drive-health';
 import { triggerSync } from '../services/sync';
+import { createAuthenticatedDriveClient } from '../utils/drive-auth';
 
-const prisma = new PrismaClient();
+let connection: IORedis | null = null;
+try {
+  const redisUrl = process.env.REDIS_URL || '';
+  if (redisUrl && !redisUrl.startsWith('http')) {
+    connection = new IORedis(redisUrl, {
+      maxRetriesPerRequest: null,
+      retryStrategy: (times) => Math.min(times * 100, 5000),
+    });
+  } else if (redisUrl.startsWith('http')) {
+    connection = new IORedis({
+      host: new URL(redisUrl).hostname,
+      port: 6379,
+      password: process.env.REDIS_REST_TOKEN || undefined,
+      tls: {},
+      maxRetriesPerRequest: null,
+      retryStrategy: (times) => Math.min(times * 100, 5000),
+    });
+  }
+} catch {
+  console.warn('Redis unavailable, background workers will be disabled');
+}
 
-const connection = new IORedis({
-  host: new URL(process.env.REDIS_URL || 'http://localhost:6379').hostname,
-  port: parseInt(new URL(process.env.REDIS_URL || 'http://localhost:6379').port) || 6379,
-  password: new URL(process.env.REDIS_URL || '').password || undefined,
-  tls: new URL(process.env.REDIS_URL || '').protocol === 'https:' ? {} : undefined,
-});
+function createQueue(name: string) {
+  return connection ? new Queue(name, { connection }) : null;
+}
 
-export const uploadQueue = new Queue('upload', { connection });
-export const downloadQueue = new Queue('download', { connection });
-export const syncQueue = new Queue('sync', { connection });
-export const healthQueue = new Queue('health', { connection });
-export const rebalanceQueue = new Queue('rebalance', { connection });
-export const thumbnailQueue = new Queue('thumbnail', { connection });
-export const cleanupQueue = new Queue('cleanup', { connection });
+function createWorker<T>(name: string, processor: (job: any) => Promise<T>) {
+  return connection ? new Worker(name, processor, { connection, concurrency: 2 }) : null;
+}
+
+export const uploadQueue = createQueue('upload');
+export const downloadQueue = createQueue('download');
+export const syncQueue = createQueue('sync');
+export const healthQueue = createQueue('health');
+export const rebalanceQueue = createQueue('rebalance');
+export const thumbnailQueue = createQueue('thumbnail');
+export const cleanupQueue = createQueue('cleanup');
 
 export async function addJob(queueName: string, data: Record<string, unknown>, options?: { delay?: number; priority?: number }) {
   const queue = getQueue(queueName);
+  if (!queue) throw new Error('Redis not available');
   return queue.add(queueName, data, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 1000 },
@@ -46,50 +70,35 @@ export function getQueue(name: string) {
 
 export async function getQueueStats() {
   const queues = [uploadQueue, downloadQueue, syncQueue, healthQueue, rebalanceQueue, thumbnailQueue, cleanupQueue];
-  const stats = {};
-  for (const queue of queues) {
-    const counts = await queue.getJobCounts();
-    stats[queue.name] = counts;
+  const stats: Record<string, unknown> = {};
+  for (const q of queues) {
+    if (q) {
+      const counts = await q.getJobCounts();
+      stats[q.name] = counts;
+    }
   }
   return stats;
 }
 
 export function startHealthWorker() {
-  const worker = new Worker('health', async (job) => {
+  if (!connection) return null;
+  return createWorker('health', async (job) => {
     const { driveId } = job.data as { driveId: string };
     return checkDriveHealth(driveId);
-  }, { connection, concurrency: 2 });
-
-  worker.on('completed', (job, result) => {
-    console.log(`Health check completed for drive ${job.data.driveId}: ${result?.status}`);
   });
-
-  worker.on('failed', (job, err) => {
-    console.error(`Health check failed for drive ${job.data.driveId}:`, err.message);
-  });
-
-  return worker;
 }
 
 export function startSyncWorker() {
-  const worker = new Worker('sync', async (job) => {
+  if (!connection) return null;
+  return createWorker('sync', async (job) => {
     const { userId } = job.data as { userId: string };
     return triggerSync(userId);
-  }, { connection, concurrency: 1 });
-
-  worker.on('completed', (job, result) => {
-    console.log(`Sync completed for user ${job.data.userId}: ${result?.triggered} drives`);
   });
-
-  worker.on('failed', (job, err) => {
-    console.error(`Sync failed for user ${job.data.userId}:`, err.message);
-  });
-
-  return worker;
 }
 
 export function startCleanupWorker() {
-  const worker = new Worker('cleanup', async (job) => {
+  if (!connection) return null;
+  return createWorker('cleanup', async (job) => {
     const { type } = job.data as { type: string };
 
     if (type === 'orphaned_chunks') {
@@ -102,10 +111,9 @@ export function startCleanupWorker() {
         try {
           const drive = await prisma.drive.findUnique({ where: { id: chunk.drive_id } });
           if (drive) {
-            const tokens = await getDecryptedTokens(drive.user_id);
+            const { client, tokens } = await createAuthenticatedDriveClient(drive.user_id);
             if (tokens?.access_token) {
-              const oauth2Client = getOAuthClient(drive.user_id);
-              const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
+              const driveApi = google.drive({ version: 'v3', auth: client as any });
               await driveApi.files.delete({ fileId: chunk.google_file_id });
             }
           }
@@ -132,7 +140,5 @@ export function startCleanupWorker() {
     }
 
     return { type, cleaned: true };
-  }, { connection, concurrency: 1 });
-
-  return worker;
+  });
 }
