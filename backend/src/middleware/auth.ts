@@ -1,7 +1,7 @@
-import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
+import { prisma } from '../db/client';
 
-const prisma = new PrismaClient();
+const JWT_SECRET = process.env.JWT_SECRET as string;
 
 export async function authenticateUser(c: any, next: any) {
   const publicPaths = ['/api/v1/auth/login', '/api/v1/auth/callback', '/api/v1/auth/connect'];
@@ -27,7 +27,7 @@ export async function authenticateUser(c: any, next: any) {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-secret') as { sub: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { sub: string };
     const user = await prisma.user.findUnique({ where: { id: decoded.sub } });
 
     if (!user) {
