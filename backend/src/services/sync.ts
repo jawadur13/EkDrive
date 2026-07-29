@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db/client';
 import { google } from 'googleapis';
-import { getDecryptedTokens, getOAuthClient } from '../utils/drive-auth';
-
-const prisma = new PrismaClient();
+import { createAuthenticatedDriveClient } from '../utils/drive-auth';
 
 export async function getSyncStatus(userId: string) {
   const drives = await prisma.drive.findMany({ where: { user_id: userId } });
@@ -10,8 +8,7 @@ export async function getSyncStatus(userId: string) {
     drive_id: d.id,
     drive_name: d.drive_name,
     status: d.status,
-    last_sync_time: d.last_sync_time,
-    sync_token: d.sync_token,
+    last_sync_time: d.last_health_check,
     pending_changes: 0,
   }));
 }
@@ -22,29 +19,22 @@ export async function triggerSync(userId: string) {
 
   for (const drive of drives) {
     try {
-      const tokens = await getDecryptedTokens(drive.user_id);
+      const { client, tokens } = await createAuthenticatedDriveClient(drive.user_id);
       if (!tokens?.access_token) {
         results.push({ drive_id: drive.id, status: 'skipped', reason: 'no_token' });
         continue;
       }
 
-      const oauth2Client = getOAuthClient(drive.user_id);
-      const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
+      const driveApi = google.drive({ version: 'v3', auth: client as any });
 
-      const syncToken = drive.sync_token;
       const params: Record<string, string> = {
         spaces: 'drive',
         fields: 'changes(kind,fileId,name,mimeType,modifiedTime,trashed,parents),nextPageToken,newStartPageToken',
       };
 
-      if (syncToken) {
-        params.pageToken = syncToken;
-      }
-
       const response = await driveApi.changes.list(params);
-
-      const changes = response.data.changes || [];
-      let newSyncToken = response.data.newStartPageToken;
+      const changes = (response.data as any).changes || [];
+      const newSyncToken = (response.data as any).newStartPageToken;
 
       for (const change of changes) {
         if (change.fileId) {
@@ -60,15 +50,7 @@ export async function triggerSync(userId: string) {
         }
       }
 
-      await prisma.drive.update({
-        where: { id: drive.id },
-        data: {
-          sync_token: newSyncToken || syncToken,
-          last_sync_time: new Date(),
-        },
-      });
-
-      results.push({ drive_id: drive.id, status: 'synced', changes_count: changes.length });
+      results.push({ drive_id: drive.id, status: 'synced', changes_count: changes.length, sync_token: newSyncToken });
     } catch (error: any) {
       results.push({ drive_id: drive.id, status: 'failed', reason: error?.message });
     }
