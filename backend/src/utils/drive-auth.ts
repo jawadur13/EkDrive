@@ -5,6 +5,7 @@ import { createDecipheriv, scryptSync } from 'crypto';
 const prisma = new PrismaClient();
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '';
+const ENCRYPTION_SALT = process.env.ENCRYPTION_SALT || 'default-salt-change-me';
 const IV_LENGTH = 16;
 
 function decrypt(encryptedText: string): string {
@@ -12,7 +13,7 @@ function decrypt(encryptedText: string): string {
   const iv = Buffer.from(parts[0], 'hex');
   const authTag = Buffer.from(parts[1], 'hex');
   const encrypted = parts[2];
-  const key = scryptSync(ENCRYPTION_KEY, 'salt', 32);
+  const key = scryptSync(ENCRYPTION_KEY, ENCRYPTION_SALT, 32);
   const decipher = createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(authTag);
   let decrypted = decipher.update(encrypted, 'hex', 'utf8');
@@ -32,34 +33,52 @@ export async function getDecryptedTokens(userId: string) {
   };
 }
 
-export function getOAuthClient(userId: string): OAuth2Client {
-  return new OAuth2Client(
+export function getOAuthClient(accessToken: string, refreshToken?: string | null): OAuth2Client {
+  const client = new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     `${process.env.CORS_ORIGIN || 'http://localhost:5173'}/auth/callback`
   );
+  client.setCredentials({
+    access_token: accessToken,
+    refresh_token: refreshToken || undefined,
+  });
+  return client;
+}
+
+export async function createAuthenticatedDriveClient(userId: string): Promise<{ client: OAuth2Client; tokens: Awaited<ReturnType<typeof getDecryptedTokens>> }> {
+  const tokens = await getDecryptedTokens(userId);
+  if (!tokens?.access_token) {
+    return { client: new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET), tokens: null };
+  }
+  return { client: getOAuthClient(tokens.access_token, tokens.refresh_token), tokens };
 }
 
 export async function refreshAccessToken(userId: string): Promise<string | null> {
   const authToken = await prisma.authToken.findUnique({ where: { user_id: userId } });
   if (!authToken?.refresh_token) return null;
 
-  const client = getOAuthClient(userId);
+  const client = new OAuth2Client(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  client.setCredentials({ refresh_token: decrypt(authToken.refresh_token) });
+
   try {
-    const { tokens } = await client.refreshToken(decrypt(authToken.refresh_token));
-    if (!tokens.access_token) return null;
+    const response = await client.getAccessToken();
+    if (!response?.token) return null;
 
     const { encrypt } = await import('./crypto');
     await prisma.authToken.update({
       where: { user_id: userId },
       data: {
-        access_token: encrypt(tokens.access_token!),
-        refresh_token: tokens.refresh_token ? encrypt(tokens.refresh_token) : authToken.refresh_token,
-        token_expiry: new Date(Date.now() + (tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600000)),
+        access_token: encrypt(response.token),
+        refresh_token: authToken.refresh_token,
+        token_expiry: new Date(Date.now() + 3600000),
       },
     });
 
-    return tokens.access_token;
+    return response.token;
   } catch {
     return null;
   }
