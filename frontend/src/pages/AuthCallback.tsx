@@ -5,34 +5,31 @@ import { useAuthStore } from '../stores/authStore';
 export default function AuthCallback() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { setUser } = useAuthStore();
+  const { checkAuth } = useAuthStore();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const hash = location.hash.slice(1);
-    const params = new URLSearchParams(hash);
-    const accessToken = params.get('access_token');
-    const refreshToken = params.get('refresh_token');
+    const params = new URLSearchParams(location.search);
+    const code = params.get('code');
+    const errorParam = params.get('error');
 
-    if (!accessToken) {
-      setError('No access token received. Please try signing in again.');
+    if (errorParam) {
+      setError('Authentication was denied. Please try again.');
       return;
     }
 
-    document.cookie = `access_token=${accessToken}; path=/; max-age=3600; samesite=strict; ${window.location.protocol === 'https:' ? 'secure;' : ''}`;
-
-    try {
-      const payload = JSON.parse(atob(accessToken.split('.')[1]));
-      setUser({
-        id: payload.sub,
-        email: payload.email,
-        displayName: payload.email?.split('@')[0] || 'User',
-      });
-      navigate('/files', { replace: true });
-    } catch {
-      setError('Failed to parse authentication token. Please try again.');
+    if (code) {
+      // Backend will handle the code exchange — redirect to callback API
+      window.location.href = `/api/v1/auth/callback?code=${encodeURIComponent(code)}`;
+      return;
     }
-  }, [location.hash, navigate, setUser]);
+
+    // No code in URL — might be a redirect from backend after successful auth
+    // Check if we're now authenticated
+    checkAuth().then(() => {
+      navigate('/files', { replace: true });
+    });
+  }, [location.search, navigate, checkAuth]);
 
   if (error) {
     return (
