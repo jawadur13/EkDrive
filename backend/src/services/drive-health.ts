@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db/client';
 import { google } from 'googleapis';
-import { getDecryptedTokens, getOAuthClient, refreshAccessToken } from '../utils/drive-auth';
-
-const prisma = new PrismaClient();
+import { createAuthenticatedDriveClient, refreshAccessToken } from '../utils/drive-auth';
 
 export async function checkDriveHealth(driveId: string) {
   const drive = await prisma.drive.findUnique({ where: { id: driveId } });
@@ -15,18 +13,17 @@ export async function checkDriveHealth(driveId: string) {
   let errorMessage: string | null = null;
 
   try {
-    const tokens = await getDecryptedTokens(drive.user_id);
+    const { client, tokens } = await createAuthenticatedDriveClient(drive.user_id);
     if (!tokens?.access_token) {
       status = 'offline';
       errorMessage = 'No access token available';
     } else {
-      const oauth2Client = getOAuthClient(drive.user_id);
-      const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
+      const driveApi = google.drive({ version: 'v3', auth: client as any });
 
       const about = await driveApi.about.get({ fields: 'storageQuota' });
       latencyMs = Date.now() - startTime;
 
-      const quota = about.data.storageQuota;
+      const quota = (about.data as any).storageQuota;
       quotaAvailable = quota?.available ? BigInt(quota.available) : null;
 
       if (quotaAvailable !== null && drive.total_quota_bytes) {
