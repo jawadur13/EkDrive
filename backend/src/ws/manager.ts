@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { upgradeWebSocket } from 'hono/websocket';
+import { upgradeWebSocket } from 'hono/ws';
 import { WebSocket } from 'ws';
 
 interface WebSocketClient extends WebSocket {

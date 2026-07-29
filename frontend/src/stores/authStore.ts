@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import api from '../services/api';
 
 interface AuthState {
   user: { id: string; email: string; displayName: string } | null;
@@ -7,6 +8,7 @@ interface AuthState {
   login: () => void;
   logout: () => void;
   setUser: (user: { id: string; email: string; displayName: string } | null) => void;
+  checkAuth: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -22,5 +24,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
   setUser: (user) => {
     set({ user, isAuthenticated: !!user, isLoading: false });
+  },
+  checkAuth: async () => {
+    try {
+      const res = await api.get('/auth/me');
+      set({ user: res.data.user, isAuthenticated: true, isLoading: false });
+    } catch (error) {
+      set({ user: null, isAuthenticated: false, isLoading: false });
+    }
   },
 }));

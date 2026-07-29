@@ -4,6 +4,12 @@ import jwt from 'jsonwebtoken';
 const prisma = new PrismaClient();
 
 export async function authenticateUser(c: any, next: any) {
+  const publicPaths = ['/api/v1/auth/login', '/api/v1/auth/callback', '/api/v1/auth/connect'];
+  if (publicPaths.includes(c.req.path)) {
+    await next();
+    return;
+  }
+
   const authHeader = c.req.header('Authorization');
   const cookieHeader = c.req.header('Cookie');
 
