@@ -1,9 +1,8 @@
 import { Hono } from 'hono';
-import { PrismaClient } from '@prisma/client';
 import { google } from 'googleapis';
-import { getDecryptedTokens, getOAuthClient } from '../utils/drive-auth';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
+import { createAuthenticatedDriveClient } from '../utils/drive-auth';
+import { computeChecksum } from '../services/chunking';
 
 export const downloadRoutes = new Hono();
 
@@ -57,13 +56,12 @@ downloadRoutes.get('/:fileId/chunk/:chunkIndex', async (c) => {
     return c.json({ error: { code: 'NOT_READY', message: 'Chunk not yet uploaded' } }, 404);
   }
 
-  const tokens = await getDecryptedTokens(chunk.drive.user_id);
+  const { client, tokens } = await createAuthenticatedDriveClient(chunk.drive.user_id);
   if (!tokens?.access_token) {
     return c.json({ error: { code: 'DRIVE_OFFLINE', message: 'Target drive is not accessible' } }, 503);
   }
 
-  const oauth2Client = getOAuthClient(chunk.drive.user_id);
-  const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
+  const driveApi = google.drive({ version: 'v3', auth: client as any });
 
   try {
     const response = await driveApi.files.get(
@@ -86,9 +84,3 @@ downloadRoutes.get('/:fileId/chunk/:chunkIndex', async (c) => {
     return c.json({ error: { code: 'DRIVE_ERROR', message: 'Failed to fetch chunk from Google Drive' } }, 502);
   }
 });
-
-async function computeChecksum(data: Buffer): Promise<string> {
-  const xxhash = await import('xxhash-wasm');
-  const hasher = await xxhash();
-  return hasher.hash(data).toString(16);
-}
