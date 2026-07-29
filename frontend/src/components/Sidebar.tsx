@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 
 const navItems = [
   { to: '/files', label: 'Files', icon: 'M4 6h16M4 12h16M4 18h7' },
@@ -7,14 +7,19 @@ const navItems = [
   { to: '/settings', label: 'Storage', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4' },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  isCollapsed: boolean;
+  onToggle: () => void;
+}
+
+export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   return (
-    <aside className="w-60 bg-white border-r border-gray-100 flex flex-col fixed inset-y-0 left-0 z-20 transition-transform duration-200">
-      <div className="px-5 py-4 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <img src="/ek-drive-logo.png" alt="EkDrive Logo" className="w-8 h-8 object-contain" />
-          <span className="text-lg font-bold text-gray-900 tracking-tight">EkDrive</span>
-        </div>
+    <aside className={`bg-white border-r border-gray-100 flex flex-col fixed inset-y-0 left-0 z-20 transition-all duration-300 ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
+      <div className={`py-4 border-b border-gray-100 flex items-center ${isCollapsed ? 'justify-center' : 'px-5'}`}>
+        <Link to="/" className="flex items-center gap-3">
+          <img src="/ek-drive-logo.png" alt="EkDrive Logo" className="w-8 h-8 object-contain flex-shrink-0" />
+          {!isCollapsed && <span className="text-lg font-bold text-gray-900 tracking-tight whitespace-nowrap">EkDrive</span>}
+        </Link>
       </div>
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <ul className="space-y-0.5">
@@ -23,31 +28,46 @@ export function Sidebar() {
               <NavLink
                 to={item.to}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  `flex items-center gap-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                    isCollapsed ? 'justify-center px-0' : 'px-3'
+                  } ${
                     isActive
                       ? 'bg-blue-50 text-blue-600 shadow-sm'
                       : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                   }`
                 }
+                title={isCollapsed ? item.label : undefined}
               >
                 <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={item.icon} />
                 </svg>
-                {item.label}
+                {!isCollapsed && <span>{item.label}</span>}
               </NavLink>
             </li>
           ))}
         </ul>
       </nav>
-      <div className="px-3 py-3 border-t border-gray-100">
-        <div className="flex items-center gap-3 px-3 py-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold">
+      <div className="px-3 py-3 border-t border-gray-100 flex flex-col gap-2">
+        <button onClick={onToggle} className={`flex items-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors ${isCollapsed ? 'justify-center p-2' : 'px-3 py-2 gap-3'}`} title="Toggle Sidebar">
+          <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {isCollapsed ? (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 19l7-7-7-7m-8 14l7-7-7-7" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            )}
+          </svg>
+          {!isCollapsed && <span className="text-sm font-medium">Collapse</span>}
+        </button>
+        <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center py-2' : 'px-3 py-2'}`}>
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
             U
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">User</p>
-            <p className="text-xs text-gray-400 truncate">user@example.com</p>
-          </div>
+          {!isCollapsed && (
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">User</p>
+              <p className="text-xs text-gray-400 truncate">user@example.com</p>
+            </div>
+          )}
         </div>
       </div>
     </aside>

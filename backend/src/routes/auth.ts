@@ -113,6 +113,25 @@ authRoutes.get('/callback', async (c) => {
   }
 });
 
+authRoutes.get('/connect', async (c) => {
+  const state = randomBytes(16).toString('hex');
+  const codeVerifier = randomBytes(32).toString('base64url');
+  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+
+  const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  googleAuthUrl.searchParams.set('client_id', process.env.GOOGLE_CLIENT_ID || '');
+  googleAuthUrl.searchParams.set('redirect_uri', `${process.env.CORS_ORIGIN || 'http://localhost:5173'}/auth/callback`);
+  googleAuthUrl.searchParams.set('response_type', 'code');
+  googleAuthUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/drive.file');
+  googleAuthUrl.searchParams.set('state', state);
+  googleAuthUrl.searchParams.set('code_challenge', codeChallenge);
+  googleAuthUrl.searchParams.set('code_challenge_method', 'S256');
+  googleAuthUrl.searchParams.set('access_type', 'offline');
+  googleAuthUrl.searchParams.set('prompt', 'consent');
+
+  return c.redirect(googleAuthUrl.toString());
+});
+
 authRoutes.get('/me', async (c) => {
   const userId = c.get('userId');
   if (!userId) {

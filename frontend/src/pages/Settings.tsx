@@ -1,4 +1,20 @@
+import { useState } from 'react';
+import api from '../services/api';
+
 export default function Settings() {
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnectDrive = async () => {
+    setConnecting(true);
+    try {
+      const response = await api.post('/auth/connect');
+      window.location.href = response.data.authUrl;
+    } catch {
+      window.location.href = '/api/v1/auth/login';
+    }
+    setConnecting(false);
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
@@ -19,7 +35,9 @@ export default function Settings() {
             </div>
             <h3 className="text-sm font-medium text-gray-900 mb-1">No drives connected</h3>
             <p className="text-sm text-gray-400 mb-4">Connect your Google Drive accounts to get started.</p>
-            <button className="btn-primary">Connect Drive</button>
+            <button onClick={handleConnectDrive} disabled={connecting} className="btn-primary">
+              {connecting ? 'Connecting...' : 'Connect Drive'}
+            </button>
           </div>
         </div>
       </div>
