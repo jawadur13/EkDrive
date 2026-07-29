@@ -1,12 +1,10 @@
 import { Hono } from 'hono';
-import { PrismaClient } from '@prisma/client';
 import { google } from 'googleapis';
+import { prisma } from '../db/client';
 import { assignChunksToDrives } from '../services/storage-engine';
-import { createChunkRecords, computeChecksum, splitIntoChunks } from '../services/chunking';
+import { createChunkRecords, computeChecksum } from '../services/chunking';
 import { getStorageMode } from '../services/storage-mode';
-import { getDecryptedTokens, getOAuthClient } from '../utils/drive-auth';
-
-const prisma = new PrismaClient();
+import { createAuthenticatedDriveClient } from '../utils/drive-auth';
 
 export const uploadRoutes = new Hono();
 
@@ -88,17 +86,16 @@ uploadRoutes.post('/:fileId/chunk/:chunkIndex', async (c) => {
     return c.json({ error: { code: 'CHECKSUM_MISMATCH', message: 'Chunk checksum does not match' } }, 400);
   }
 
-  const tokens = await getDecryptedTokens(chunk.drive.user_id);
+  const { client, tokens } = await createAuthenticatedDriveClient(chunk.drive.user_id);
   if (!tokens?.access_token) {
     return c.json({ error: { code: 'DRIVE_OFFLINE', message: 'Target drive is not accessible' } }, 503);
   }
 
-  const oauth2Client = getOAuthClient(chunk.drive.user_id);
-  const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
+  const driveApi = google.drive({ version: 'v3', auth: client as any });
 
   const fileName = `ekdrive-chunk:${fileId}:${chunkIndex}`;
 
-  await driveApi.files.create({
+  const driveResponse = await driveApi.files.create({
     requestBody: {
       name: fileName,
       mimeType: 'application/octet-stream',
@@ -111,10 +108,12 @@ uploadRoutes.post('/:fileId/chunk/:chunkIndex', async (c) => {
     fields: 'id',
   });
 
+  const googleFileId = driveResponse.data.id!;
+
   await prisma.chunk.update({
     where: { file_id_chunk_index: { file_id: fileId, chunk_index: chunkIndex } },
     data: {
-      google_file_id: fileName,
+      google_file_id: googleFileId,
       upload_status: 'uploaded',
     },
   });
@@ -123,13 +122,6 @@ uploadRoutes.post('/:fileId/chunk/:chunkIndex', async (c) => {
     where: { file_id: fileId, upload_status: 'uploaded' },
   });
   const totalChunks = await prisma.chunk.count({ where: { file_id: fileId } });
-
-  if (allUploaded === totalChunks && totalChunks > 0) {
-    await prisma.file.update({
-      where: { id: fileId },
-      data: { status: 'ready' },
-    });
-  }
 
   return c.json({ chunk_index: chunkIndex, status: 'uploaded', progress: allUploaded / totalChunks });
 });
@@ -143,10 +135,5 @@ uploadRoutes.post('/:fileId/complete', async (c) => {
     return c.json({ error: { code: 'NOT_FOUND', message: 'File not found' } }, 404);
   }
 
-  await prisma.file.update({
-    where: { id: fileId },
-    data: { status: 'ready' },
-  });
-
-  return c.json({ file_id: fileId, status: 'ready' });
+  return c.json({ file_id: fileId, status: 'complete' });
 });
