@@ -12,11 +12,7 @@ export function Sidebar() {
     <aside className="w-60 bg-white border-r border-gray-100 flex flex-col fixed inset-y-0 left-0 z-20 transition-transform duration-200">
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
-          </div>
+          <img src="/ek-drive-logo.png" alt="EkDrive Logo" className="w-8 h-8 object-contain" />
           <span className="text-lg font-bold text-gray-900 tracking-tight">EkDrive</span>
         </div>
       </div>

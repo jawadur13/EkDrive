@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import helmet from 'helmet';
+import { WebSocketManager } from './ws/manager';
+import { authenticateUser } from './middleware/auth';
 import { authRoutes } from './routes/auth';
 import { fileRoutes } from './routes/files';
 import { driveRoutes } from './routes/drives';
@@ -23,6 +25,8 @@ app.use('*', cors({
 }));
 app.use('*', logger());
 
+app.use('/api/v1/*', authenticateUser);
+
 app.route('/api/v1/auth', authRoutes);
 app.route('/api/v1/files', fileRoutes);
 app.route('/api/v1/drives', driveRoutes);
@@ -36,7 +40,11 @@ app.route('/api/v1/files', previewRoutes);
 
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+const wsManager = new WebSocketManager();
+app.route('/ws', wsManager.router);
+
 const port = parseInt(process.env.PORT || '3000');
+
 serve({ fetch: app.fetch, port });
 
 console.log(`EkDrive backend running on http://localhost:${port}`);

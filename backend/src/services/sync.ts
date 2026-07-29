@@ -1,4 +1,8 @@
-import { prisma } from '../db/client';
+import { PrismaClient } from '@prisma/client';
+import { google } from 'googleapis';
+import { getDecryptedTokens, getOAuthClient } from '../utils/drive-auth';
+
+const prisma = new PrismaClient();
 
 export async function getSyncStatus(userId: string) {
   const drives = await prisma.drive.findMany({ where: { user_id: userId } });
@@ -14,7 +18,63 @@ export async function getSyncStatus(userId: string) {
 
 export async function triggerSync(userId: string) {
   const drives = await prisma.drive.findMany({ where: { user_id: userId, status: 'online' } });
-  return { triggered: drives.length, drives: drives.map((d) => d.id) };
+  const results = [];
+
+  for (const drive of drives) {
+    try {
+      const tokens = await getDecryptedTokens(drive.user_id);
+      if (!tokens?.access_token) {
+        results.push({ drive_id: drive.id, status: 'skipped', reason: 'no_token' });
+        continue;
+      }
+
+      const oauth2Client = getOAuthClient(drive.user_id);
+      const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
+
+      const syncToken = drive.sync_token;
+      const params: Record<string, string> = {
+        spaces: 'drive',
+        fields: 'changes(kind,fileId,name,mimeType,modifiedTime,trashed,parents),nextPageToken,newStartPageToken',
+      };
+
+      if (syncToken) {
+        params.pageToken = syncToken;
+      }
+
+      const response = await driveApi.changes.list(params);
+
+      const changes = response.data.changes || [];
+      let newSyncToken = response.data.newStartPageToken;
+
+      for (const change of changes) {
+        if (change.fileId) {
+          await prisma.syncEntry.create({
+            data: {
+              user_id: userId,
+              drive_id: drive.id,
+              google_file_id: change.fileId,
+              operation: change.kind === 'change' ? 'update' : 'create',
+              sync_status: 'pending',
+            },
+          });
+        }
+      }
+
+      await prisma.drive.update({
+        where: { id: drive.id },
+        data: {
+          sync_token: newSyncToken || syncToken,
+          last_sync_time: new Date(),
+        },
+      });
+
+      results.push({ drive_id: drive.id, status: 'synced', changes_count: changes.length });
+    } catch (error: any) {
+      results.push({ drive_id: drive.id, status: 'failed', reason: error?.message });
+    }
+  }
+
+  return { triggered: drives.length, results };
 }
 
 export async function getConflicts(userId: string) {
