@@ -1,7 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db/client';
 import { google } from 'googleapis';
-
-const prisma = new PrismaClient();
+import { createAuthenticatedDriveClient } from '../utils/drive-auth';
 
 export async function listFiles(userId: string, parentFolderId: string | null, cursor: string | null, limit: number = 50) {
   const files = await prisma.file.findMany({
@@ -32,11 +31,10 @@ export async function createFolder(userId: string, name: string, parentFolderId:
   const drive = await prisma.drive.findUnique({ where: { id: driveId } });
   if (!drive) throw new Error('Drive not found');
 
-  const tokens = await getDecryptedTokens(drive.user_id);
+  const { client, tokens } = await createAuthenticatedDriveClient(drive.user_id);
   if (!tokens?.access_token) throw new Error('No access token');
 
-  const oauth2Client = getOAuthClient(drive.user_id);
-  const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
+  const driveApi = google.drive({ version: 'v3', auth: client as any });
 
   const folder = await driveApi.files.create({
     requestBody: {
@@ -83,28 +81,46 @@ export async function uploadFile(userId: string, name: string, parentFolderId: s
 }
 
 export async function updateFile(userId: string, fileId: string, data: Partial<{ name: string; parent_folder_id: string }>) {
-  return prisma.file.update({ where: { id: fileId, user_id: userId }, data });
+  const file = await prisma.file.findFirst({ where: { id: fileId, user_id: userId } });
+  if (!file) throw new Error('File not found');
+  return prisma.file.update({ where: { id: fileId }, data });
 }
 
 export async function deleteFile(userId: string, fileId: string) {
-  const file = await prisma.file.findFirst({ where: { id: fileId, user_id: userId } });
+  const file = await prisma.file.findFirst({
+    where: { id: fileId, user_id: userId },
+    include: { chunks: true },
+  });
   if (!file) throw new Error('File not found');
 
-  for (const googleFileId of file.google_file_ids) {
-    const driveId = file.drive_assignments?.[googleFileId];
-    if (driveId) {
-      const drive = await prisma.drive.findUnique({ where: { id: driveId } });
-      if (drive) {
-        try {
-          const tokens = await getDecryptedTokens(drive.user_id);
-          if (tokens?.access_token) {
-            const oauth2Client = getOAuthClient(drive.user_id);
-            const driveApi = google.drive({ version: 'v3', auth: oauth2Client });
-            await driveApi.files.delete({ fileId: googleFileId });
-          }
-        } catch {
-          // Continue deleting other chunks even if one fails
+  for (const chunk of file.chunks) {
+    const drive = await prisma.drive.findUnique({ where: { id: chunk.drive_id } });
+    if (drive && chunk.google_file_id) {
+      try {
+        const { client, tokens } = await createAuthenticatedDriveClient(drive.user_id);
+        if (tokens?.access_token) {
+          const driveApi = google.drive({ version: 'v3', auth: client as any });
+          await driveApi.files.delete({ fileId: chunk.google_file_id });
         }
+      } catch {
+        // Continue deleting other chunks even if one fails
+      }
+    }
+  }
+
+  for (const googleFileId of file.google_file_ids) {
+    const drive = file.chunks.length > 0
+      ? await prisma.drive.findFirst({ where: { id: file.chunks[0].drive_id } })
+      : null;
+    if (drive) {
+      try {
+        const { client, tokens } = await createAuthenticatedDriveClient(drive.user_id);
+        if (tokens?.access_token) {
+          const driveApi = google.drive({ version: 'v3', auth: client as any });
+          await driveApi.files.delete({ fileId: googleFileId });
+        }
+      } catch {
+        // Continue deleting other chunks even if one fails
       }
     }
   }
@@ -124,41 +140,4 @@ export async function searchFiles(userId: string, query: string) {
     },
     take: 50,
   });
-}
-
-async function getDecryptedTokens(userId: string) {
-  const authToken = await prisma.authToken.findUnique({ where: { user_id: userId } });
-  if (!authToken) return null;
-
-  const { createDecipheriv, scryptSync } = await import('crypto');
-  const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '';
-  const IV_LENGTH = 16;
-
-  const decrypt = (encryptedText: string): string => {
-    const parts = encryptedText.split(':');
-    const iv = Buffer.from(parts[0], 'hex');
-    const authTag = Buffer.from(parts[1], 'hex');
-    const encrypted = parts[2];
-    const key = scryptSync(ENCRYPTION_KEY, 'salt', 32);
-    const decipher = createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-  };
-
-  return {
-    access_token: decrypt(authToken.access_token),
-    refresh_token: authToken.refresh_token ? decrypt(authToken.refresh_token) : null,
-    token_expiry: authToken.token_expiry,
-  };
-}
-
-function getOAuthClient(userId: string) {
-  const { OAuth2Client } = require('google-auth-library');
-  return new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.CORS_ORIGIN || 'http://localhost:5173'}/auth/callback`
-  );
 }
