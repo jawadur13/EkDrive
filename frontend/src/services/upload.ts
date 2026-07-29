@@ -15,14 +15,11 @@ export function initUpload(file: File, parentFolderId?: string) {
 }
 
 export async function uploadChunk(fileId: string, chunkIndex: number, chunkData: Blob) {
-  const formData = new FormData();
-  formData.append('chunk', chunkData);
-
-  return api.post(`/api/v1/upload/${fileId}/chunk/${chunkIndex}`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  return api.post(`/upload/${fileId}/chunk/${chunkIndex}`, chunkData, {
+    headers: { 'Content-Type': 'application/octet-stream' },
   });
 }
 
 export async function completeUpload(fileId: string) {
-  return api.post(`/api/v1/upload/${fileId}/complete`);
+  return api.post(`/upload/${fileId}/complete`);
 }
