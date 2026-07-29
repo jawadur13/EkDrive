@@ -7,7 +7,7 @@ export default function FileList() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['files', folderId],
-    queryFn: () => api.get('/api/v1/files', { params: { parent_id: folderId } }).then((r) => r.data),
+    queryFn: () => api.get('/files').then((r) => r.data),
   });
 
   if (isLoading) {
