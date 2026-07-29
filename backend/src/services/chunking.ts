@@ -1,11 +1,12 @@
 import { prisma } from '../db/client';
-import xxhash from 'xxhash-wasm';
 
 const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE_BYTES || '52428800');
 
 export async function computeChecksum(data: Buffer): Promise<string> {
-  const hasher = await xxhash();
-  return hasher.hash(data).toString(16);
+  const xxhash = await import('xxhash-wasm');
+  const hasher = await xxhash.default();
+  const raw = hasher.h64Raw(new Uint8Array(data));
+  return raw.toString(16);
 }
 
 export function getChunkSize(): number {
@@ -45,8 +46,9 @@ export async function createChunkRecords(fileId: string, placement: Array<{ chun
     chunk_index: p.chunkIndex,
     size_bytes: p.chunkSize,
     checksum: checksums[p.chunkIndex] || '',
+    google_file_id: '',
     upload_status: 'pending' as const,
   }));
 
-  await prisma.chunk.createMany({ data: chunkRecords });
+  await prisma.chunk.createMany({ data: chunkRecords as any });
 }
