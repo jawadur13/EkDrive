@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import helmet from 'helmet';
-import { WebSocketManager } from './ws/manager';
+// import { WebSocketManager } from './ws/manager';
 import { authenticateUser } from './middleware/auth';
 import { authRoutes } from './routes/auth';
 import { fileRoutes } from './routes/files';
@@ -40,8 +40,8 @@ app.route('/api/v1/files', previewRoutes);
 
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-const wsManager = new WebSocketManager();
-app.route('/ws', wsManager.router);
+// const wsManager = new WebSocketManager();
+// app.route('/ws', wsManager.router);
 
 const port = parseInt(process.env.PORT || '3000');
 
