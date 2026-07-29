@@ -14,7 +14,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: true,
   login: () => {
-    window.location.href = '/auth/login';
+    window.location.href = '/api/v1/auth/login';
   },
   logout: () => {
     document.cookie = 'access_token=; Max-Age=0; path=/; secure; samesite=strict';

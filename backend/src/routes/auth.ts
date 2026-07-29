@@ -103,11 +103,8 @@ authRoutes.get('/callback', async (c) => {
       { expiresIn: '30d' }
     );
 
-    return c.json({
-      user: { id: user.id, email: user.email, displayName: user.display_name, avatarUrl: user.avatar_url },
-      accessToken: jwtToken,
-      refreshToken,
-    });
+    const frontendUrl = `${process.env.CORS_ORIGIN || 'http://localhost:5173'}/auth/callback`;
+    return c.redirect(`${frontendUrl}#access_token=${jwtToken}&refresh_token=${refreshToken}`);
   } catch (error: any) {
     return c.json({ error: { code: 'AUTH_ERROR', message: error?.message || 'Authentication failed' } }, 500);
   }

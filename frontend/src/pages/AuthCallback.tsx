@@ -1,0 +1,60 @@
+import { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuthStore } from '../stores/authStore';
+
+export default function AuthCallback() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { setUser } = useAuthStore();
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const hash = location.hash.slice(1);
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+
+    if (!accessToken) {
+      setError('No access token received. Please try signing in again.');
+      return;
+    }
+
+    document.cookie = `access_token=${accessToken}; path=/; max-age=3600; samesite=strict; ${window.location.protocol === 'https:' ? 'secure;' : ''}`;
+
+    try {
+      const payload = JSON.parse(atob(accessToken.split('.')[1]));
+      setUser({
+        id: payload.sub,
+        email: payload.email,
+        displayName: payload.email?.split('@')[0] || 'User',
+      });
+      navigate('/files', { replace: true });
+    } catch {
+      setError('Failed to parse authentication token. Please try again.');
+    }
+  }, [location.hash, navigate, setUser]);
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="card p-8 max-w-md text-center">
+          <svg className="w-12 h-12 mx-auto text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <h3 className="text-sm font-medium text-gray-900 mb-2">Authentication Failed</h3>
+          <p className="text-sm text-gray-500 mb-4">{error}</p>
+          <button onClick={() => navigate('/login')} className="btn-primary">Try Again</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="flex items-center gap-2 text-gray-400">
+        <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <span className="text-sm">Completing sign in...</span>
+      </div>
+    </div>
+  );
+}

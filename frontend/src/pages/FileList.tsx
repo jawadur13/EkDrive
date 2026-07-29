@@ -82,14 +82,14 @@ export default function FileList() {
   const files = data?.files ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Files</h2>
+        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Files</h2>
         <button className="btn-primary">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Upload
+          Upload File
         </button>
       </div>
 
@@ -107,27 +107,31 @@ export default function FileList() {
         </div>
       ) : (
         <div className="card overflow-hidden">
-          <table className="w-full">
+          <table className="w-full whitespace-nowrap">
             <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Size</th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Modified</th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Drive</th>
+              <tr className="border-b border-slate-100 bg-slate-50/50">
+                <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
+                <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Size</th>
+                <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Modified</th>
+                <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Drive</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-slate-50">
               {files.map((file: any) => (
-                <tr key={file.id} className="hover:bg-blue-50/50 transition-colors duration-150 cursor-pointer group">
-                  <td className="px-6 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg">{getFileIcon(file.mime_type)}</span>
-                      <span className="text-sm font-medium text-gray-900 group-hover:text-blue-600 transition-colors truncate max-w-xs">{file.name}</span>
+                <tr key={file.id} className="hover:bg-blue-50/40 transition-colors duration-200 cursor-pointer group">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-4">
+                      <span className="text-xl flex-shrink-0 w-9 h-9 flex items-center justify-center bg-slate-50 rounded-xl group-hover:bg-white group-hover:shadow-sm transition-all">{getFileIcon(file.mime_type)}</span>
+                      <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-600 transition-colors truncate max-w-sm">{file.name}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-3 text-sm text-gray-500">{formatBytes(file.size_bytes)}</td>
-                  <td className="px-6 py-3 text-sm text-gray-400">{timeAgo(file.updated_at)}</td>
-                  <td className="px-6 py-3 text-sm text-gray-400">{file.drive_name || '—'}</td>
+                  <td className="px-6 py-4 text-sm text-slate-500 font-medium">{formatBytes(file.size_bytes)}</td>
+                  <td className="px-6 py-4 text-sm text-slate-400">{timeAgo(file.updated_at)}</td>
+                  <td className="px-6 py-4 text-sm text-slate-400">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
+                      {file.drive_name || 'Local'}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
