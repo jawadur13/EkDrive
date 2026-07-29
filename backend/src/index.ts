@@ -1,3 +1,4 @@
+import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -35,4 +36,7 @@ app.route('/api/v1/files', previewRoutes);
 
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-export default app;
+const port = parseInt(process.env.PORT || '3000');
+serve({ fetch: app.fetch, port });
+
+console.log(`EkDrive backend running on http://localhost:${port}`);
