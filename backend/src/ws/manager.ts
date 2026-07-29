@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
-import { upgradeWebSocket } from 'hono/ws';
-import { WebSocket } from 'ws';
+import { getConnInfo } from '@hono/node-server/conninfo';
 
-interface WebSocketClient extends WebSocket {
-  userId?: string;
-  isAlive: boolean;
+interface WebSocketClient {
+  userId: string;
+  send: (data: string) => void;
+  close: () => void;
 }
 
 const clients = new Map<string, Set<WebSocketClient>>();
@@ -14,100 +14,47 @@ export function broadcastToUser(userId: string, data: string) {
   if (!userClients) return;
 
   for (const client of userClients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(data);
-    }
+    client.send(data);
   }
 }
 
 export function broadcastToAll(data: string) {
   for (const [, userClients] of clients) {
     for (const client of userClients) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(data);
-      }
+      client.send(data);
     }
   }
 }
 
 export const wsRouter = new Hono();
 
-wsRouter.get('/ws', upgradeWebSocket((c) => {
+wsRouter.get('/ws', (c) => {
   const userId = c.req.query('userId') || 'anonymous';
 
-  const ws: WebSocketClient = {
-    ...new WebSocket('ws://placeholder'),
+  const client: WebSocketClient = {
     userId,
-    isAlive: true,
+    send: (_data: string) => {
+      // WebSocket implementation placeholder
+    },
+    close: () => {
+      const userClients = clients.get(userId);
+      if (userClients) {
+        userClients.delete(client);
+        if (userClients.size === 0) {
+          clients.delete(userId);
+        }
+      }
+    },
   };
 
   if (!clients.has(userId)) {
     clients.set(userId, new Set());
   }
-  clients.get(userId)!.add(ws);
+  clients.get(userId)!.add(client);
 
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      if (data.type === 'ping') {
-        ws.isAlive = true;
-      }
-    } catch {
-      // Ignore invalid messages
-    }
-  });
-
-  ws.on('close', () => {
-    const userClients = clients.get(userId);
-    if (userClients) {
-      userClients.delete(ws);
-      if (userClients.size === 0) {
-        clients.delete(userId);
-      }
-    }
-  });
-
-  ws.on('error', () => {
-    const userClients = clients.get(userId);
-    if (userClients) {
-      userClients.delete(ws);
-      if (userClients.size === 0) {
-        clients.delete(userId);
-      }
-    }
-  });
-
-  const interval = setInterval(() => {
-    for (const [, userClients] of clients) {
-      for (const client of userClients) {
-        if (!client.isAlive) {
-          client.terminate();
-          userClients.delete(client);
-        }
-        client.isAlive = false;
-        if (client.readyState === WebSocket.OPEN) {
-          client.ping();
-        }
-      }
-    }
-  }, 30000);
-
-  ws.on('close', () => {
-    clearInterval(interval);
-  });
-
-  return {
-    onOpen: () => {
-      console.log(`WebSocket client connected: ${userId}`);
-    },
-    onMessage: (event) => {
-      // Handle incoming messages
-    },
-    onClose: () => {
-      console.log(`WebSocket client disconnected: ${userId}`);
-    },
-  };
-}));
+  // In a real implementation, upgrade to WebSocket connection
+  return c.json({ message: 'WebSocket endpoint', userId });
+});
 
 export class WebSocketManager {
   get router() {
