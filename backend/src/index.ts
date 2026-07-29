@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { helmet } from 'helmet';
+import helmet from 'helmet';
 import { authRoutes } from './routes/auth';
 import { fileRoutes } from './routes/files';
 import { driveRoutes } from './routes/drives';

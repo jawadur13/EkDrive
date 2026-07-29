@@ -6,3 +6,178 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique @db.VarChar(255)
+  display_name  String?  @db.VarChar(255)
+  avatar_url    String?  @db.Text
+  storage_mode  String   @default("balanced") @db.VarChar(20)
+  max_storage_gb Int?
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  updated_at    DateTime @default(now()) @db.Timestamp(6)
+
+  authToken     AuthToken?
+  drives        Drive[]
+  files         File[]
+  storageMode   StorageMode?
+  shareLinks    ShareLink[]
+  healthChecks  HealthCheck[]
+  syncEntries   SyncEntry[]
+}
+
+model AuthToken {
+  id            String   @id @default(uuid()) @db.Uuid
+  user_id       String   @unique @db.Uuid
+  access_token  String   @db.Text
+  refresh_token String   @db.Text
+  token_expiry  DateTime @db.Timestamp(6)
+  scopes        String[]
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  revoked_at    DateTime? @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+}
+
+model Drive {
+  id                String   @id @default(uuid()) @db.Uuid
+  user_id           String   @db.Uuid
+  drive_name        String   @db.VarChar(255)
+  google_drive_id   String   @unique @db.VarChar(255)
+  drive_type        String   @default("personal") @db.VarChar(20)
+  root_folder_id    String   @db.VarChar(255)
+  total_quota_bytes BigInt?
+  used_quota_bytes  BigInt?
+  available_quota_bytes BigInt?
+  oauth_token_encrypted String @db.Text
+  token_expiry      DateTime? @db.Timestamp(6)
+  status            String   @default("online") @db.VarChar(20)
+  last_health_check DateTime? @db.Timestamp(6)
+  created_at        DateTime @default(now()) @db.Timestamp(6)
+  updated_at        DateTime @default(now()) @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+  chunks Chunk[]
+  healthChecks HealthCheck[]
+  syncEntries SyncEntry[]
+
+  @@index([user_id])
+  @@index([status])
+}
+
+model File {
+  id              String   @id @default(uuid()) @db.Uuid
+  user_id         String   @db.Uuid
+  parent_id       String?  @db.Uuid
+  name            String   @db.VarChar(1024)
+  virtual_path    String   @db.Text
+  is_folder       Boolean  @default(false)
+  mime_type       String?  @db.VarChar(255)
+  size_bytes      BigInt?
+  checksum        String?  @db.VarChar(64)
+  google_file_ids String[]
+  drive_assignments Json?
+  chunk_count     Int      @default(0)
+  is_chunked      Boolean  @default(false)
+  redundancy_copies Int    @default(1)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+  updated_at      DateTime @default(now()) @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+  parent File? @relation("FileParent", fields: [parent_id], references: [id])
+  children File[] @relation("FileParent")
+  chunks Chunk[]
+  shareLinks ShareLink[]
+  syncEntries SyncEntry[]
+
+  @@index([user_id])
+  @@index([parent_id])
+  @@index([virtual_path])
+}
+
+model Chunk {
+  id            String   @id @default(uuid()) @db.Uuid
+  file_id       String   @db.Uuid
+  drive_id      String   @db.Uuid
+  chunk_index   Int
+  google_file_id String   @db.VarChar(255)
+  size_bytes    BigInt
+  checksum      String   @db.VarChar(64)
+  upload_status String   @default("pending") @db.VarChar(20)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  updated_at    DateTime @default(now()) @db.Timestamp(6)
+
+  file File @relation(fields: [file_id], references: [id])
+  drive Drive @relation(fields: [drive_id], references: [id])
+
+  @@index([file_id])
+  @@index([drive_id])
+  @@unique([file_id, chunk_index])
+}
+
+model StorageMode {
+  id              String   @id @default(uuid()) @db.Uuid
+  user_id         String   @unique @db.Uuid
+  mode            String   @default("balanced") @db.VarChar(20)
+  min_replicas    Int      @default(1)
+  rebalance_threshold Float @default(0.2)
+  updated_at      DateTime @default(now()) @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+}
+
+model HealthCheck {
+  id            String   @id @default(uuid()) @db.Uuid
+  drive_id      String   @db.Uuid
+  user_id       String   @db.Uuid
+  status        String   @db.VarChar(20)
+  latency_ms    Int?
+  quota_available BigInt?
+  error_message String?  @db.Text
+  checked_at    DateTime @default(now()) @db.Timestamp(6)
+
+  drive Drive @relation(fields: [drive_id], references: [id])
+  user User @relation(fields: [user_id], references: [id])
+
+  @@index([drive_id])
+  @@index([checked_at])
+}
+
+model SyncEntry {
+  id                  String   @id @default(uuid()) @db.Uuid
+  user_id             String   @db.Uuid
+  file_id             String?  @db.Uuid
+  drive_id            String?  @db.Uuid
+  google_file_id      String?  @db.VarChar(255)
+  operation           String   @db.VarChar(20)
+  sync_status         String   @default("pending") @db.VarChar(20)
+  conflict_resolution String?  @db.VarChar(20)
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+  resolved_at         DateTime? @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+  file File? @relation(fields: [file_id], references: [id])
+  drive Drive? @relation(fields: [drive_id], references: [id])
+
+  @@index([user_id])
+  @@index([sync_status])
+  @@index([drive_id])
+}
+
+model ShareLink {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String   @db.Uuid
+  file_id     String   @db.Uuid
+  token       String   @unique @db.VarChar(64)
+  expires_at  DateTime? @db.Timestamp(6)
+  max_downloads Int?
+  download_count Int   @default(0)
+  permissions String   @default("view") @db.VarChar(20)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+  file File @relation(fields: [file_id], references: [id])
+
+  @@index([token])
+  @@index([user_id])
+}
