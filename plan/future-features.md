@@ -12,7 +12,7 @@ This document outlines features planned for EkDrive beyond the initial v1 launch
 |---|---|---|
 | **OneDrive integration** | Connect Microsoft OneDrive accounts as additional storage backends | Medium |
 | **Dropbox integration** | Connect Dropbox accounts as additional storage backends | Medium |
-| **S3-compatible storage** | Support any S3-compatible object storage (MinIO, Wasabi, Backblaze B2) | High |
+| **S3-compatible storage** | Support any S3-compatible object storage (Backblaze B2, Cloudflare R2) | High |
 | **Unified provider abstraction** | Abstract storage provider interface so new providers can be added without changing core logic | High |
 
 ### 2.2 Enhanced Storage Modes
@@ -93,7 +93,7 @@ This document outlines features planned for EkDrive beyond the initial v1 launch
 | **Deduplication** | Deduplicate identical chunks across all files and users | High |
 | **Compression** | Transparent compression of chunks before upload | Medium |
 | **Content-addressable storage** | Content-addressed chunk storage for deduplication and integrity | High |
-| **Multi-cloud support** | Combine Google Drive, OneDrive, Dropbox, and S3 in a single pool | Very High |
+| **Multi-cloud storage** | Combine Google Drive, OneDrive, Dropbox, and S3-compatible storage in a single pool | Very High |
 
 ### 4.4 AI-Powered Features
 

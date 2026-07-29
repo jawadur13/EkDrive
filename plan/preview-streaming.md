@@ -57,7 +57,7 @@ The server:
 ### 4.1 Image Previews
 
 - Images are streamed directly from Google Drive to the browser.
-- For large images, the server can generate a thumbnail on first access and cache it in MinIO.
+- For large images, the server can generate a thumbnail on first access and cache it in Redis.
 - Thumbnails are generated at multiple resolutions (128px, 256px, 512px) for responsive display.
 
 ### 4.2 PDF Previews
@@ -96,7 +96,7 @@ The server:
 
 ### 5.2 Thumbnail Storage
 
-- Thumbnails are stored in MinIO (object storage).
+- Thumbnails are stored in Redis cache.
 - Thumbnail metadata is stored in PostgreSQL (`files.thumbnail_url`).
 - Thumbnails are cached in Redis with a TTL of 24 hours.
 
@@ -107,7 +107,7 @@ The server:
 3. For images: resize to the target thumbnail dimensions.
 4. For videos: extract the first keyframe using FFmpeg.
 5. For PDFs: render the first page using PDF.js or a server-side PDF renderer.
-6. Store the thumbnail in MinIO.
+6. Store the thumbnail in Redis cache.
 7. Update the file record with the thumbnail URL.
 
 ## 6. Streaming for Large Files
@@ -123,7 +123,7 @@ The server:
 
 | Resource | Cache Location | TTL |
 |---|---|---|
-| Thumbnails | Redis + MinIO | 24 hours |
+| Thumbnails | Redis | 24 hours |
 | Preview metadata | Redis | 1 hour |
 | Chunk locations | Redis | 5 minutes |
 | Streamed content | CDN (edge cache) | 5 minutes |

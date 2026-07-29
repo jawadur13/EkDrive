@@ -32,7 +32,7 @@ Background jobs handle asynchronous, long-running, or periodic tasks that should
 
 **Lifecycle**:
 1. Worker picks up the job.
-2. Fetches chunk data from the client or MinIO staging area.
+2. Fetches chunk data from the client directly via the upload endpoint.
 3. Retrieves the target drive's OAuth token.
 4. Uploads the chunk to Google Drive.
 5. Verifies the upload by checking the file size and checksum.
@@ -55,7 +55,7 @@ Background jobs handle asynchronous, long-running, or periodic tasks that should
 2. Retrieves the target drive's OAuth token.
 3. Fetches the chunk from Google Drive.
 4. Verifies the chunk checksum.
-5. Stores the chunk in MinIO staging or streams directly to the client.
+5. Stores the chunk in Redis cache or streams directly to the client.
 6. Updates the chunk record in the database.
 
 ### 3.3 Sync Job
@@ -128,7 +128,7 @@ Background jobs handle asynchronous, long-running, or periodic tasks that should
 **Lifecycle**:
 1. Worker fetches the first chunk of the file from Google Drive.
 2. Generates a thumbnail based on the file type.
-3. Stores the thumbnail in MinIO.
+3. Stores the thumbnail in Redis cache.
 4. Updates the file record with the thumbnail URL.
 
 ### 3.7 Cleanup Job

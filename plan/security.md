@@ -39,7 +39,7 @@ The security model follows the principle of least privilege, defense in depth, a
 |---|---|
 | **OAuth Tokens** | AES-256-GCM, encrypted at rest in PostgreSQL. |
 | **Data in Transit** | TLS 1.3 for all client-server and server-Google API communication. |
-| **Chunk Data** | Chunks stored in Google Drive are encrypted by Google (at rest). MinIO storage uses server-side encryption. |
+| **Chunk Data** | Chunks stored in Google Drive are encrypted by Google (at rest). |
 | **Database Fields** | Sensitive fields (email, display name) are encrypted at the application level before storage. |
 
 ### 3.2 Key Management

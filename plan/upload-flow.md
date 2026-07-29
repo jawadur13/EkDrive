@@ -126,7 +126,7 @@ Body:
 ### Step 5: Upload Worker Processes Chunks
 
 1. Upload Worker picks up a job from the queue.
-2. Worker fetches the chunk data from the client (via a presigned URL or direct upload to MinIO staging).
+2. Worker fetches the chunk data from the client directly via the upload endpoint.
 3. Worker retrieves the target drive's OAuth token from the database.
 4. Worker uploads the chunk to Google Drive using the Drive API:
 

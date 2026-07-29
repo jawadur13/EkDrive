@@ -46,9 +46,9 @@ EkDrive follows a **layered, modular architecture** with clear separation of con
 - **Web Workers**: Perform client-side chunking, encoding, and checksum computation without blocking the UI thread.
 
 ### 2.2 API Gateway
-- Terminates TLS, handles rate limiting, and routes requests to the application server.
+- Vercel handles TLS termination, routing, rate limiting, and CORS.
+- Vercel Serverless Functions serve as the backend API.
 - Provides a single entry point for all client communication.
-- Handles CORS, request validation, and authentication token forwarding.
 
 ### 2.3 Application Server
 The core backend, implemented as a set of microservices or a modular monolith (see Tech Stack).
@@ -63,9 +63,8 @@ The core backend, implemented as a set of microservices or a modular monolith (s
 | **Background Jobs** | Async task processing (uploads, downloads, sync, rebalancing) |
 
 ### 2.4 Data Layer
-- **PostgreSQL**: Primary metadata store (users, files, drives, chunks, sessions).
-- **Redis**: Cache for hot metadata, job queue, rate limiting counters, and session store.
-- **Object Storage** (MinIO/S3-compatible): Temporary chunk storage during upload/download, and durable chunk blobs for the High Reliability mode.
+- **PostgreSQL (Neon)**: Primary metadata store (users, files, drives, chunks, sessions).
+- **Redis (Upstash)**: Cache for hot metadata, job queue, rate limiting counters, and session store.
 
 ### 2.5 Google Drive API Layer
 - Manages OAuth2 tokens for each connected Google account.
@@ -85,9 +84,9 @@ The core backend, implemented as a set of microservices or a modular monolith (s
 **Rationale**: Decouples the user's mental model (one drive, one folder tree) from the physical reality (data spread across multiple Google Drive accounts). This allows the storage engine to change placement logic without affecting the user's view.
 
 ### 3.3 Chunk Storage Strategy
-**Decision**: Chunks are stored as objects in MinIO/S3-compatible storage during transit, and as Google Drive files in the target accounts for durable storage.
+**Decision**: Chunks are stored directly as Google Drive files in the target accounts. No intermediate object storage is used.
 
-**Rationale**: Google Drive API does not support arbitrary binary blobs natively — files must be stored as Drive files. MinIO provides a fast staging area for chunk assembly and temporary storage during chunking operations.
+**Rationale**: Google Drive API does not support arbitrary binary blobs natively — files must be stored as Drive files. Since EkDrive never stores user file bytes on its own infrastructure, chunks are uploaded directly to Google Drive from the client or backend. This eliminates the need for MinIO/S3 and keeps all user data exclusively on the users' connected Google Drive accounts.
 
 ### 3.4 Metadata-First Design
 **Decision**: All file metadata (name, size, virtual path, chunk references, drive assignments, checksums) is stored in PostgreSQL. Google Drive file IDs are stored as references, not as the source of truth.

@@ -33,7 +33,8 @@ Target coverage:
 | Layer | Framework | Scope |
 |---|---|---|
 | **API Integration** | Vitest + Supertest | HTTP endpoints with mocked database |
-| **Database** | Prisma + Testcontainers | Real PostgreSQL instance in Docker for migration and query tests |
+| **Database** | Prisma + Testcontainers (PostgreSQL) | Real PostgreSQL instance in Docker for migration and query tests |
+| **Cache** | Upstash Redis (local dev) | Serverless Redis for job queue testing |
 | **Google Drive API** | Nock / MSW | Mock Google Drive API responses for upload/download tests |
 | **BullMQ Jobs** | BullMQ + Vitest | Job processing, retries, and dead letter handling |
 
@@ -139,6 +140,6 @@ pnpm test:coverage
 
 | Environment | Purpose | Database | External Services |
 |---|---|---|---|
-| **Local** | Developer testing | Docker Compose PostgreSQL | Mocked Google Drive API |
+| **Local** | Developer testing | Neon (free PostgreSQL) + Upstash (free Redis) | Mocked Google Drive API |
 | **Staging** | Integration and E2E testing | Dedicated staging PostgreSQL | Sandbox Google Drive API |
 | **Production** | Monitoring and canary testing | Production PostgreSQL | Production Google Drive API |

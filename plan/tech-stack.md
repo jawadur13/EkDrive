@@ -49,22 +49,20 @@
 
 | Layer | Technology | Rationale |
 |---|---|---|
-| **Primary Database** | PostgreSQL 16+ | Relational database for structured metadata. ACID compliance, JSONB support for flexible schemas, excellent Prisma support. |
-| **Cache & Queue** | Redis 7+ | Caching hot metadata, BullMQ job queue, rate limiting, session store. |
-| **Object Storage** | MinIO (S3-compatible) | Staging area for file chunks during upload/download. Durable chunk storage for High Reliability mode. Can be swapped to AWS S3 or GCS in production. |
+| **Primary Database** | Neon (PostgreSQL 16) | Serverless PostgreSQL, free tier (0.5GB). ACID compliance, JSONB support, excellent Prisma support. No infrastructure management. |
+| **Cache & Queue** | Upstash Redis | Serverless Redis, free tier (30MB). Caching hot metadata, BullMQ job queue, rate limiting, session store. No infrastructure management. |
+| **Object Storage** | None | All user file data is stored exclusively on the users' connected Google Drive accounts. EkDrive never stores user file bytes. Only metadata (chunk references, drive assignments, checksums) is stored in PostgreSQL. |
 
 ## 4. Infrastructure
 
 | Concern | Technology | Rationale |
 |---|---|---|
-| **Containerization** | Docker + Docker Compose | Consistent dev and prod environments. |
-| **Process Manager** | PM2 or Docker native | Node.js process management, clustering, zero-downtime reloads. |
-| **Reverse Proxy** | Caddy or Nginx | TLS termination, reverse proxying, rate limiting. |
-| **CI/CD** | GitHub Actions | Automated testing, linting, building, and deployment. |
-| **Cloud Provider** | AWS (or self-hosted) | ECS/EKS for containers, RDS for PostgreSQL, ElastiCache for Redis, S3 for object storage. |
-| **Monitoring** | Prometheus + Grafana | Metrics collection and visualization for system health. |
-| **Log Aggregation** | Loki + Grafana (or ELK) | Centralized log querying and dashboarding. |
-| **Error Tracking** | Sentry (or open-source alternative) | Real-time error monitoring and alerting. |
+| **Frontend Hosting** | Vercel | Free tier for static sites and serverless functions. Global CDN, instant deployments, preview URLs. |
+| **Backend Hosting** | Vercel Serverless Functions | Zero-config serverless functions. Scales automatically. Free tier includes 100GB bandwidth/month. |
+| **Background Workers** | Vercel Cron Jobs + Serverless Functions | Scheduled jobs (health checks, sync, cleanup) run as serverless functions triggered by Vercel Cron. |
+| **CI/CD** | GitHub Actions | Automated testing, linting, building, and deployment. Free for public repos. |
+| **Monitoring** | Vercel Analytics + Sentry (free tier) | Performance monitoring and error tracking. |
+| **DNS** | Cloudflare (free tier) | DNS management, CDN, and DDoS protection. |
 
 ## 5. Google Drive Integration
 
@@ -73,7 +71,7 @@
 | **API** | Google Drive API v3 |
 | **Auth Flow** | OAuth 2.0 (Authorization Code with PKCE) |
 | **Scopes** | `https://www.googleapis.com/auth/drive.file` (per-file access) for v1; `drive` for full access if needed later |
-| **Token Storage** | Encrypted at rest in PostgreSQL, encrypted in transit via TLS |
+| **Token Storage** | Encrypted at rest in Neon (PostgreSQL), encrypted in transit via TLS |
 | **Rate Limiting** | Per-drive quota tracking; exponential backoff on 429 responses |
 | **SDK** | Google API Node.js Client (`googleapis` package) |
 
@@ -81,12 +79,14 @@
 
 | Tool | Purpose |
 |---|---|
-| **Docker Compose** | Spin up PostgreSQL, Redis, MinIO locally for development. |
+| **Neon** | Serverless PostgreSQL for development and testing. |
+| **Upstash Redis** | Serverless Redis for caching and job queue in development. |
 | **Prisma Studio** | Visual database inspection and migration management. |
 | **ESLint + Prettier** | Code quality and formatting enforcement. |
 | **Husky + lint-staged** | Pre-commit hooks for linting and formatting. |
 | **Vitest** | Unit and integration testing framework. |
 | **Playwright** | End-to-end testing for the frontend. |
+| **Vercel CLI** | `vercel dev` for local backend development with serverless functions. |
 
 ## 7. Key Trade-Offs
 
@@ -94,6 +94,8 @@
 |---|---|
 | **Modular monolith over microservices** | Simpler deployment and development, but services cannot be scaled independently yet. |
 | **PostgreSQL over a NoSQL store** | Strong consistency for metadata is critical; NoSQL would add complexity for relational data. |
-| **MinIO over direct Drive storage for chunks** | Adds infrastructure complexity but provides a fast staging layer and decouples chunk handling from Drive API limits. |
+| **No object storage** | Eliminates infrastructure complexity and cost, but chunks are stored directly on Google Drive which has API rate limits. |
+| **Vercel serverless over dedicated servers** | Zero infrastructure management, automatic scaling, but cold starts may add latency to first request. |
+| **Neon/Upstash over self-hosted** | No database/Redis management, but free tiers have storage and connection limits. |
 | **BullMQ over a custom scheduler** | Battle-tested, feature-rich, but adds Redis dependency. |
 | **React SPA over SSR** | File operations are inherently interactive; SPA provides the best UX for real-time updates and drag-and-drop. |

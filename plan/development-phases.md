@@ -27,7 +27,7 @@ Total estimated timeline: 26 weeks (approximately 6 months).
 
 | Deliverable | Description | Acceptance Criteria |
 |---|---|---|
-| Dev environment | Docker Compose with PostgreSQL, Redis, MinIO | `docker compose up` starts all services |
+| Dev environment | Neon (PostgreSQL), Upstash (Redis), Vercel CLI | `pnpm dev` starts frontend and backend locally |
 | CI/CD pipeline | GitHub Actions for lint, test, build, deploy | PRs trigger CI; main branch triggers deploy to staging |
 | Auth service | Google OAuth 2.0 with PKCE, JWT session management | Users can log in, log out, and session persists across refreshes |
 | Database schema | Prisma schema with all tables and migrations | Migrations run cleanly; seed data loads |

@@ -80,7 +80,7 @@ Each chunk is checksummed before upload and after download:
 3. Creates file record in database (status: 'uploading').
 4. Creates chunk records in database (status: 'pending').
 5. Background job picks up each chunk upload task.
-6. Job fetches chunk data from the client (or MinIO staging area).
+6. Job fetches chunk data from the client directly via the upload endpoint.
 7. Job uploads chunk to the selected Google Drive account.
 8. Job updates chunk status to 'uploaded' and records the Google Drive file ID.
 9. When all chunks are uploaded:
@@ -118,7 +118,7 @@ If a chunk upload fails:
 
 ### 4.2 Chunk Caching
 
-- Frequently accessed chunks are cached in MinIO (object storage) for faster subsequent downloads.
+- Frequently accessed chunks are cached in Redis for faster subsequent downloads.
 - Cache entries have a TTL of 1 hour.
 - Cache is invalidated when the source file is modified or deleted.
 - Cache is not used for High Reliability mode chunks (always fetched from the primary drive).
