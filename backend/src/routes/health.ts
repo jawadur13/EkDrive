@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getAllDriveHealth } from '../services/drive-health';
 
 export const healthRoutes = new Hono();
 
@@ -7,5 +8,7 @@ healthRoutes.get('/', async (c) => {
 });
 
 healthRoutes.get('/drives', async (c) => {
-  return c.json({ drives: [] });
+  const userId = (c as any).get('userId') as string;
+  const drives = await getAllDriveHealth(userId);
+  return c.json({ drives });
 });
