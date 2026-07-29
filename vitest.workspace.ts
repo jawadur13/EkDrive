@@ -1,0 +1,14 @@
+# Vitest configuration
+include:
+  - backend/src/**/*.test.ts
+  - frontend/src/**/*.test.ts
+
+coverage:
+  provider: v8
+  reporter:
+    - text
+    - json
+    - html
+  thresholds:
+    lines: 80
+    branches: 70
