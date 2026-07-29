@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../services/api';
+import api from '../services/api';
 
 export default function FileList() {
   const [folderId, setFolderId] = useState<string | null>(null);
