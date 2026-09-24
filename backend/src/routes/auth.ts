@@ -1,176 +1,141 @@
+import { env } from '../env';
 import { Hono } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { randomBytes, createHash } from 'crypto';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../db/client';
+import { createOAuthClient, GOOGLE_SCOPES, getOAuthRedirectUri } from '../utils/drive-auth';
+import { DriveOwnershipError, upsertConnectedDrive } from '../services/drives';
+import { getStorageMode } from '../services/storage-mode';
+import { logActivity } from '../services/activity';
+import { SESSION_COOKIE, SESSION_TTL_SECONDS } from '../middleware/auth';
 
 export const authRoutes = new Hono();
 
-function getBackendUrl() {
-  const port = process.env.PORT || '3000';
-  return process.env.BACKEND_URL || `http://localhost:${port}`;
-}
+const STATE_COOKIE = 'oauth_state';
+const STATE_TTL_SECONDS = 10 * 60;
 
-function getFrontendUrl() {
-  return process.env.CORS_ORIGIN || 'http://localhost:5173';
-}
+type OAuthState = {
+  state: string;
+  codeVerifier: string;
+  mode: 'login' | 'connect';
+  userId?: string;
+};
 
-const JWT_SECRET = process.env.JWT_SECRET as string;
-
-authRoutes.get('/login', async (c) => {
+// The PKCE verifier and the expected state stay server-side in a signed, HttpOnly cookie;
+// only the random state value travels through Google.
+function beginOAuth(c: any, mode: OAuthState['mode'], userId?: string) {
   const state = randomBytes(16).toString('hex');
   const codeVerifier = randomBytes(32).toString('base64url');
   const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
 
-  const statePayload = Buffer.from(JSON.stringify({ state, codeVerifier })).toString('base64url');
+  const payload: OAuthState = { state, codeVerifier, mode, userId };
+  setCookie(c, STATE_COOKIE, jwt.sign(payload, env.jwtSecret, { expiresIn: STATE_TTL_SECONDS }), {
+    path: '/api/v1/auth',
+    httpOnly: true,
+    sameSite: 'Lax',
+    secure: env.secureCookies,
+    maxAge: STATE_TTL_SECONDS,
+  });
 
-  const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  googleAuthUrl.searchParams.set('client_id', process.env.GOOGLE_CLIENT_ID || '');
-  googleAuthUrl.searchParams.set('redirect_uri', `${getBackendUrl()}/api/v1/auth/callback`);
-  googleAuthUrl.searchParams.set('response_type', 'code');
-  googleAuthUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/drive.file');
-  googleAuthUrl.searchParams.set('state', statePayload);
-  googleAuthUrl.searchParams.set('code_challenge', codeChallenge);
-  googleAuthUrl.searchParams.set('code_challenge_method', 'S256');
-  googleAuthUrl.searchParams.set('access_type', 'offline');
-  googleAuthUrl.searchParams.set('prompt', 'consent');
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id', env.googleClientId);
+  url.searchParams.set('redirect_uri', getOAuthRedirectUri());
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', GOOGLE_SCOPES.join(' '));
+  url.searchParams.set('state', state);
+  url.searchParams.set('code_challenge', codeChallenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('access_type', 'offline');
+  url.searchParams.set('prompt', 'consent select_account');
+  return url.toString();
+}
 
-  return c.redirect(googleAuthUrl.toString());
+authRoutes.get('/login', (c) => c.redirect(beginOAuth(c, 'login')));
+
+// Adds another Google account as a drive for the signed-in user. Returns JSON so the SPA
+// can navigate; the state cookie is set on this response.
+authRoutes.get('/connect', (c) => {
+  const userId = (c as any).get('userId') as string;
+  return c.json({ authUrl: beginOAuth(c, 'connect', userId) });
 });
 
 authRoutes.get('/callback', async (c) => {
-  const code = c.req.query('code');
-  const stateParam = c.req.query('state');
+  const stateCookie = getCookie(c, STATE_COOKIE);
+  deleteCookie(c, STATE_COOKIE, { path: '/api/v1/auth' });
 
-  if (!code) {
-    return c.json({ error: { code: 'INVALID_REQUEST', message: 'Authorization code missing' } }, 400);
+  let pending: OAuthState | null = null;
+  try {
+    pending = stateCookie ? (jwt.verify(stateCookie, env.jwtSecret) as OAuthState) : null;
+  } catch {
+    pending = null;
   }
 
-  let codeVerifier: string | undefined;
-  if (stateParam) {
-    try {
-      const decoded = JSON.parse(Buffer.from(stateParam, 'base64url').toString());
-      codeVerifier = decoded.codeVerifier;
-    } catch {
-      // State is a plain string or malformed — fall through
-    }
+  const fail = (reason: string) => {
+    const page = pending?.mode === 'connect' ? 'settings' : 'login';
+    return c.redirect(`${env.frontendUrl}/${page}?error=${reason}`);
+  };
+
+  if (c.req.query('error')) return fail('access_denied');
+
+  const code = c.req.query('code');
+  if (!pending || !code || c.req.query('state') !== pending.state) {
+    return fail('invalid_state');
   }
 
   try {
-    const { OAuth2Client } = await import('google-auth-library');
-    const client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      `${getBackendUrl()}/api/v1/auth/callback`
-    );
+    const client = createOAuthClient();
+    const { tokens } = await client.getToken({ code, codeVerifier: pending.codeVerifier });
+    if (!tokens.access_token || !tokens.id_token) return fail('token_error');
 
-    const tokenParams: any = { code };
-    if (codeVerifier) {
-      tokenParams.codeVerifier = codeVerifier;
-    }
-    const { tokens } = await client.getToken(tokenParams);
-
-    if (!tokens.access_token) {
-      return c.json({ error: { code: 'TOKEN_ERROR', message: 'Failed to exchange code for tokens' } }, 500);
-    }
-
-    const ticket = await client.verifyIdToken({
-      idToken: tokens.id_token!,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-
+    const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: env.googleClientId });
     const payload = ticket.getPayload();
-    if (!payload) {
-      return c.json({ error: { code: 'TOKEN_ERROR', message: 'Failed to verify ID token' } }, 500);
+    if (!payload?.email || !payload.email_verified) return fail('unverified_email');
+
+    if (pending.mode === 'connect') {
+      const user = pending.userId ? await prisma.user.findUnique({ where: { id: pending.userId } }) : null;
+      if (!user) return fail('session_expired');
+      await upsertConnectedDrive(user.id, tokens, payload.email);
+      await logActivity(user.id, 'drive.connected', null, { drive: payload.email });
+      return c.redirect(`${env.frontendUrl}/settings?connected=1`);
     }
 
-    const email = payload.email!;
-    const displayName = payload.name || email.split('@')[0];
-    const avatarUrl = payload.picture;
-
-    let user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          email,
-          display_name: displayName,
-          avatar_url: avatarUrl,
-          storage_mode: 'balanced',
-        },
-      });
-    }
-
-    const { encrypt } = await import('../utils/crypto');
-    await prisma.authToken.upsert({
-      where: { user_id: user.id },
+    const user = await prisma.user.upsert({
+      where: { email: payload.email },
       create: {
-        user_id: user.id,
-        access_token: encrypt(tokens.access_token!),
-        refresh_token: tokens.refresh_token ? encrypt(tokens.refresh_token) : '',
-        token_expiry: new Date(Date.now() + (tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600000)),
-        scopes: tokens.scope?.split(' ') || [],
+        email: payload.email,
+        display_name: payload.name || payload.email.split('@')[0],
+        avatar_url: payload.picture,
       },
-      update: {
-        user_id: user.id,
-        access_token: encrypt(tokens.access_token!),
-        refresh_token: tokens.refresh_token ? encrypt(tokens.refresh_token) : '',
-        token_expiry: new Date(Date.now() + (tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600000)),
-        scopes: tokens.scope?.split(' ') || [],
-      },
+      update: { display_name: payload.name || undefined, avatar_url: payload.picture },
     });
 
-    const jwt = (await import('jsonwebtoken')).default;
-    const jwtToken = jwt.sign(
-      { sub: user.id, email: user.email, iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600, type: 'access' },
-      JWT_SECRET,
-      { expiresIn: '1h' }
-    );
+    // The account used to sign in is also the user's first drive.
+    await upsertConnectedDrive(user.id, tokens, payload.email);
 
-    const refreshJwt = jwt.sign(
-      { sub: user.id, type: 'refresh' },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-
-    c.header('Set-Cookie', `access_token=${jwtToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600; ${c.req.url.startsWith('https') ? 'Secure;' : ''}`);
-    return c.redirect(`${getFrontendUrl()}/files`);
-  } catch (error: any) {
-    return c.json({ error: { code: 'AUTH_ERROR', message: error?.message || 'Authentication failed' } }, 500);
+    const session = jwt.sign({ sub: user.id, type: 'session' }, env.jwtSecret, { expiresIn: SESSION_TTL_SECONDS });
+    setCookie(c, SESSION_COOKIE, session, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'Lax',
+      secure: env.secureCookies,
+      maxAge: SESSION_TTL_SECONDS,
+    });
+    return c.redirect(`${env.frontendUrl}/files`);
+  } catch (error) {
+    if (error instanceof DriveOwnershipError) return fail('drive_in_use');
+    console.error('OAuth callback failed:', error);
+    return fail('auth_failed');
   }
-});
-
-authRoutes.get('/connect', async (c) => {
-  const userId = (c as any).get('userId');
-  const state = randomBytes(16).toString('hex');
-  const codeVerifier = randomBytes(32).toString('base64url');
-  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
-
-  const statePayload = Buffer.from(JSON.stringify({ state, codeVerifier, connectUserId: userId })).toString('base64url');
-
-  const googleAuthUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  googleAuthUrl.searchParams.set('client_id', process.env.GOOGLE_CLIENT_ID || '');
-  googleAuthUrl.searchParams.set('redirect_uri', `${getBackendUrl()}/api/v1/auth/callback`);
-  googleAuthUrl.searchParams.set('response_type', 'code');
-  googleAuthUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/drive.file');
-  googleAuthUrl.searchParams.set('state', statePayload);
-  googleAuthUrl.searchParams.set('code_challenge', codeChallenge);
-  googleAuthUrl.searchParams.set('code_challenge_method', 'S256');
-  googleAuthUrl.searchParams.set('access_type', 'offline');
-  googleAuthUrl.searchParams.set('prompt', 'consent');
-
-  return c.json({ authUrl: googleAuthUrl.toString() });
 });
 
 authRoutes.get('/me', async (c) => {
-  const userId = (c as any).get('userId');
-  if (!userId) {
-    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }, 401);
-  }
-
+  const userId = (c as any).get('userId') as string;
   const user = await prisma.user.findUnique({ where: { id: userId } });
-
   if (!user) {
     return c.json({ error: { code: 'NOT_FOUND', message: 'User not found' } }, 404);
   }
+  const mode = await getStorageMode(userId);
 
   return c.json({
     user: {
@@ -178,17 +143,12 @@ authRoutes.get('/me', async (c) => {
       email: user.email,
       displayName: user.display_name,
       avatarUrl: user.avatar_url,
-      storageMode: user.storage_mode,
+      storageMode: mode.mode,
     },
   });
 });
 
-authRoutes.post('/logout', async (c) => {
-  const userId = (c as any).get('userId');
-  if (userId) {
-    await prisma.authToken.deleteMany({ where: { user_id: userId } });
-  }
-
-  c.header('Set-Cookie', 'access_token=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+authRoutes.post('/logout', (c) => {
+  deleteCookie(c, SESSION_COOKIE, { path: '/', secure: env.secureCookies });
   return c.json({ message: 'Logged out' });
 });

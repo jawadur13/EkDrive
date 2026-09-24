@@ -1,47 +1,43 @@
+import { env } from '../env';
+import { getCookie } from 'hono/cookie';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../db/client';
 
-const JWT_SECRET = process.env.JWT_SECRET as string;
+export const SESSION_COOKIE = 'access_token';
+export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+const PUBLIC_PATHS = ['/api/v1/auth/login', '/api/v1/auth/callback'];
+const PUBLIC_PREFIXES = ['/api/v1/shares/public/'];
 
 export async function authenticateUser(c: any, next: any) {
-  const publicPaths = ['/api/v1/auth/login', '/api/v1/auth/callback', '/api/v1/auth/connect'];
-  if (publicPaths.includes(c.req.path)) {
+  const path: string = c.req.path;
+  if (PUBLIC_PATHS.includes(path) || PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix))) {
     await next();
     return;
   }
 
-  const authHeader = c.req.header('Authorization');
-  const cookieHeader = c.req.header('Cookie');
-
-  let token = null;
-
-  if (authHeader?.startsWith('Bearer ')) {
-    token = authHeader.slice(7);
-  } else if (cookieHeader) {
-    const match = cookieHeader.match(/access_token=([^;]+)/);
-    if (match) token = match[1];
-  }
+  const authHeader: string | undefined = c.req.header('Authorization');
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : getCookie(c, SESSION_COOKIE);
 
   if (!token) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } }, 401);
   }
 
+  let userId: string;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { sub: string };
-    const user = await prisma.user.findUnique({ where: { id: decoded.sub } });
-
-    if (!user) {
-      return c.json({ error: { code: 'UNAUTHORIZED', message: 'User not found' } }, 401);
-    }
-
-    c.set('userId', user.id);
-    c.set('user', user);
-    await next();
+    const decoded = jwt.verify(token, env.jwtSecret) as { sub?: string; type?: string };
+    if (decoded.type !== 'session' || !decoded.sub) throw new Error('Not a session token');
+    userId = decoded.sub;
   } catch {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
   }
-}
 
-export function getUserFromContext(c: any): string | null {
-  return c.get('userId') || null;
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'User not found' } }, 401);
+  }
+
+  c.set('userId', user.id);
+  c.set('user', user);
+  await next();
 }
