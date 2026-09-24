@@ -24,6 +24,8 @@ model User {
   shareLinks    ShareLink[]
   healthChecks  HealthCheck[]
   syncEntries   SyncEntry[]
+  activities    Activity[]
+  notifications Notification[]
 }
 
 model AuthToken {
@@ -49,8 +51,11 @@ model Drive {
   total_quota_bytes BigInt?
   used_quota_bytes  BigInt?
   available_quota_bytes BigInt?
+  google_email      String?  @db.VarChar(255)
   oauth_token_encrypted String @db.Text
+  refresh_token_encrypted String? @db.Text
   token_expiry      DateTime? @db.Timestamp(6)
+  sync_page_token   String?  @db.VarChar(255)
   status            String   @default("online") @db.VarChar(20)
   last_health_check DateTime? @db.Timestamp(6)
   created_at        DateTime @default(now()) @db.Timestamp(6)
@@ -80,6 +85,10 @@ model File {
   chunk_count     Int      @default(0)
   is_chunked      Boolean  @default(false)
   redundancy_copies Int    @default(1)
+  status          String   @default("ready") @db.VarChar(20)
+  trashed_at      DateTime? @db.Timestamp(6)
+  // The item the user trashed; its descendants share trashed_at but are not roots.
+  trash_root      Boolean  @default(false)
   created_at      DateTime @default(now()) @db.Timestamp(6)
   updated_at      DateTime @default(now()) @db.Timestamp(6)
 
@@ -93,6 +102,7 @@ model File {
   @@index([user_id])
   @@index([parent_id])
   @@index([virtual_path])
+  @@index([user_id, trashed_at])
 }
 
 model Chunk {
@@ -102,7 +112,7 @@ model Chunk {
   chunk_index   Int
   google_file_id String   @db.VarChar(255)
   size_bytes    BigInt
-  checksum      String   @db.VarChar(64)
+  checksum      String   @default("") @db.VarChar(64)
   upload_status String   @default("pending") @db.VarChar(20)
   created_at    DateTime @default(now()) @db.Timestamp(6)
   updated_at    DateTime @default(now()) @db.Timestamp(6)
@@ -112,7 +122,7 @@ model Chunk {
 
   @@index([file_id])
   @@index([drive_id])
-  @@unique([file_id, chunk_index])
+  @@unique([file_id, chunk_index, drive_id])
 }
 
 model StorageMode {
@@ -180,4 +190,35 @@ model ShareLink {
 
   @@index([token])
   @@index([user_id])
+}
+
+model Activity {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  action     String   @db.VarChar(40)
+  // No FK: the log outlives the file, so the name is kept as it was.
+  file_id    String?  @db.Uuid
+  file_name  String?  @db.VarChar(1024)
+  details    Json?
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@index([user_id, created_at])
+}
+
+model Notification {
+  id         String    @id @default(uuid()) @db.Uuid
+  user_id    String    @db.Uuid
+  type       String    @db.VarChar(40)
+  severity   String    @default("info") @db.VarChar(10)
+  title      String    @db.VarChar(255)
+  body       String?   @db.Text
+  read_at    DateTime? @db.Timestamp(6)
+  created_at DateTime  @default(now()) @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [id])
+
+  @@index([user_id, read_at])
+  @@index([user_id, created_at])
 }
