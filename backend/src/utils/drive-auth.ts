@@ -1,85 +1,53 @@
-import { OAuth2Client } from 'google-auth-library';
-import { PrismaClient } from '@prisma/client';
-import { createDecipheriv, scryptSync } from 'crypto';
+import { env } from '../env';
+import { google, drive_v3, type Auth } from 'googleapis';
+import type { Drive } from '@prisma/client';
+import { prisma } from '../db/client';
+import { decrypt, encrypt } from './crypto';
 
-const prisma = new PrismaClient();
+export const GOOGLE_SCOPES = ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.file'];
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '';
-const ENCRYPTION_SALT = process.env.ENCRYPTION_SALT || 'default-salt-change-me';
-const IV_LENGTH = 16;
-
-function decrypt(encryptedText: string): string {
-  const parts = encryptedText.split(':');
-  const iv = Buffer.from(parts[0], 'hex');
-  const authTag = Buffer.from(parts[1], 'hex');
-  const encrypted = parts[2];
-  const key = scryptSync(ENCRYPTION_KEY, ENCRYPTION_SALT, 32);
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
+export function getOAuthRedirectUri() {
+  return `${env.backendUrl}/api/v1/auth/callback`;
 }
 
-export async function getDecryptedTokens(userId: string) {
-  const authToken = await prisma.authToken.findUnique({ where: { user_id: userId } });
-  if (!authToken) return null;
-
-  return {
-    access_token: decrypt(authToken.access_token),
-    refresh_token: authToken.refresh_token ? decrypt(authToken.refresh_token) : null,
-    token_expiry: authToken.token_expiry,
-    scopes: authToken.scopes,
-  };
+export function createOAuthClient(): Auth.OAuth2Client {
+  return new google.auth.OAuth2(env.googleClientId, env.googleClientSecret, getOAuthRedirectUri());
 }
 
-export function getOAuthClient(accessToken: string, refreshToken?: string | null): OAuth2Client {
-  const client = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.CORS_ORIGIN || 'http://localhost:5173'}/auth/callback`
-  );
+// Builds an OAuth client from the drive's own stored tokens. google-auth-library refreshes
+// the access token when it expires; the refreshed token is written back so the next
+// request does not refresh again.
+export function getDriveOAuthClient(drive: Pick<Drive, 'id' | 'oauth_token_encrypted' | 'refresh_token_encrypted' | 'token_expiry'>): Auth.OAuth2Client {
+  if (!drive.oauth_token_encrypted) {
+    throw new DriveAuthError('Drive has no stored credentials; reconnect it');
+  }
+
+  const client = createOAuthClient();
   client.setCredentials({
-    access_token: accessToken,
-    refresh_token: refreshToken || undefined,
+    access_token: decrypt(drive.oauth_token_encrypted),
+    refresh_token: drive.refresh_token_encrypted ? decrypt(drive.refresh_token_encrypted) : undefined,
+    expiry_date: drive.token_expiry?.getTime(),
   });
+
+  client.on('tokens', (tokens) => {
+    if (!tokens.access_token) return;
+    prisma.drive
+      .update({
+        where: { id: drive.id },
+        data: {
+          oauth_token_encrypted: encrypt(tokens.access_token),
+          ...(tokens.refresh_token ? { refresh_token_encrypted: encrypt(tokens.refresh_token) } : {}),
+          token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        },
+      })
+      .catch((error) => console.error(`Failed to persist refreshed token for drive ${drive.id}:`, error));
+  });
+
   return client;
 }
 
-export async function createAuthenticatedDriveClient(userId: string): Promise<{ client: OAuth2Client; tokens: Awaited<ReturnType<typeof getDecryptedTokens>> }> {
-  const tokens = await getDecryptedTokens(userId);
-  if (!tokens?.access_token) {
-    return { client: new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET), tokens: null };
-  }
-  return { client: getOAuthClient(tokens.access_token, tokens.refresh_token), tokens };
+export function getDriveApi(drive: Parameters<typeof getDriveOAuthClient>[0]): drive_v3.Drive {
+  return google.drive({ version: 'v3', auth: getDriveOAuthClient(drive) });
 }
 
-export async function refreshAccessToken(userId: string): Promise<string | null> {
-  const authToken = await prisma.authToken.findUnique({ where: { user_id: userId } });
-  if (!authToken?.refresh_token) return null;
-
-  const client = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-  client.setCredentials({ refresh_token: decrypt(authToken.refresh_token) });
-
-  try {
-    const response = await client.getAccessToken();
-    if (!response?.token) return null;
-
-    const { encrypt } = await import('./crypto');
-    await prisma.authToken.update({
-      where: { user_id: userId },
-      data: {
-        access_token: encrypt(response.token),
-        refresh_token: authToken.refresh_token,
-        token_expiry: new Date(Date.now() + 3600000),
-      },
-    });
-
-    return response.token;
-  } catch {
-    return null;
-  }
-}
+export class DriveAuthError extends Error {}
