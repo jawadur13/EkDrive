@@ -2,94 +2,109 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import { prisma } from '../db/client';
+import { parseBody } from '../middleware/validation';
+import { FILE_STATUS } from '../services/files';
+import { fileResponse } from '../services/file-stream';
+import { logActivity } from '../services/activity';
+import { HttpError, notFound } from '../utils/errors';
 
 export const shareRoutes = new Hono();
 
 const createShareSchema = z.object({
-  file_id: z.string().uuid(),
-  expires_at: z.string().datetime().optional(),
-  max_downloads: z.number().int().nonnegative().optional(),
-  permissions: z.enum(['view', 'download']).default('view'),
+  fileId: z.string().uuid(),
+  expiresAt: z.string().datetime().optional(),
+  maxDownloads: z.number().int().positive().optional(),
+  permissions: z.enum(['view', 'download']).default('download'),
 });
+
+const shareFileSelect = { id: true, name: true, mime_type: true, size_bytes: true } as const;
 
 shareRoutes.post('/', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const body = await c.req.json();
-  const parsed = createShareSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request body' } }, 422);
-  }
+  const body = await parseBody(c, createShareSchema);
 
-  const file = await prisma.file.findFirst({ where: { id: parsed.data.file_id, user_id: userId } });
-  if (!file) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'File not found' } }, 404);
+  const file = await prisma.file.findFirst({ where: { id: body.fileId, user_id: userId, trashed_at: null } });
+  if (!file) throw notFound('File');
+  if (file.is_folder || file.status !== FILE_STATUS.ready) {
+    throw new HttpError(400, 'NOT_SHAREABLE', 'Only fully uploaded files can be shared');
   }
-
-  const token = randomBytes(32).toString('hex');
 
   const shareLink = await prisma.shareLink.create({
     data: {
       user_id: userId,
-      file_id: parsed.data.file_id,
-      token,
-      expires_at: parsed.data.expires_at ? new Date(parsed.data.expires_at) : null,
-      max_downloads: parsed.data.max_downloads,
-      permissions: parsed.data.permissions,
+      file_id: file.id,
+      token: randomBytes(32).toString('hex'),
+      expires_at: body.expiresAt ? new Date(body.expiresAt) : null,
+      max_downloads: body.maxDownloads,
+      permissions: body.permissions,
     },
+    include: { file: { select: shareFileSelect } },
   });
-
+  await logActivity(userId, 'share.created', file, { shareId: shareLink.id, maxDownloads: body.maxDownloads ?? null });
   return c.json(shareLink, 201);
 });
 
 shareRoutes.get('/', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const shares = await prisma.shareLink.findMany({ where: { user_id: userId }, include: { file: true } });
+  const shares = await prisma.shareLink.findMany({
+    where: { user_id: userId },
+    include: { file: { select: shareFileSelect } },
+    orderBy: { created_at: 'desc' },
+  });
   return c.json({ shares });
 });
 
-shareRoutes.get('/:token', async (c) => {
-  const token = c.req.param('token');
+shareRoutes.delete('/:shareId{[0-9a-fA-F-]{36}}', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  const shareId = c.req.param('shareId');
+  const share = await prisma.shareLink.findFirst({ where: { id: shareId, user_id: userId }, include: { file: true } });
+  if (!share) throw notFound('Share link');
+  await prisma.shareLink.delete({ where: { id: share.id } });
+  await logActivity(userId, 'share.revoked', share.file, { shareId });
+  return c.json({ id: shareId, message: 'Share link revoked' });
+});
 
-  const shareLink = await prisma.shareLink.findUnique({
-    where: { token },
-    include: { file: true },
-  });
+// --- Public (no session) — see PUBLIC_PREFIXES in middleware/auth.ts ---
 
-  if (!shareLink) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'Share link not found' } }, 404);
+async function getActiveShare(token: string) {
+  const share = await prisma.shareLink.findUnique({ where: { token }, include: { file: true } });
+  if (!share || share.file.trashed_at) throw notFound('Share link');
+  if (share.expires_at && new Date() > share.expires_at) throw new HttpError(410, 'EXPIRED', 'Share link has expired');
+  if (share.max_downloads && share.download_count >= share.max_downloads) {
+    throw new HttpError(410, 'LIMIT_EXCEEDED', 'Download limit reached');
   }
+  return share;
+}
 
-  if (shareLink.expires_at && new Date() > shareLink.expires_at) {
-    return c.json({ error: { code: 'EXPIRED', message: 'Share link has expired' } }, 410);
-  }
-
-  if (shareLink.max_downloads && shareLink.download_count >= shareLink.max_downloads) {
-    return c.json({ error: { code: 'LIMIT_EXCEEDED', message: 'Download limit reached' } }, 410);
-  }
-
-  await prisma.shareLink.update({
-    where: { id: shareLink.id },
-    data: { download_count: { increment: 1 } },
-  });
-
+shareRoutes.get('/public/:token', async (c) => {
+  const share = await getActiveShare(c.req.param('token'));
   return c.json({
-    file_id: shareLink.file_id,
-    file_name: shareLink.file.name,
-    mime_type: shareLink.file.mime_type,
-    size_bytes: shareLink.file.size_bytes,
-    permissions: shareLink.permissions,
+    fileName: share.file.name,
+    mimeType: share.file.mime_type,
+    sizeBytes: share.file.size_bytes,
+    permissions: share.permissions,
+    expiresAt: share.expires_at,
   });
 });
 
-shareRoutes.delete('/:shareId', async (c) => {
-  const userId = (c as any).get('userId') as string;
-  const shareId = c.req.param('shareId');
+shareRoutes.get('/public/:token/content', async (c) => {
+  const share = await getActiveShare(c.req.param('token'));
+  const disposition = share.permissions === 'download' && c.req.query('download') === '1' ? 'attachment' : 'inline';
 
-  const shareLink = await prisma.shareLink.findFirst({ where: { id: shareId, user_id: userId } });
-  if (!shareLink) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'Share link not found' } }, 404);
-  }
+  // Follow-up range requests (a video player seeking) do not count as another download.
+  const rangeHeader = c.req.header('Range');
+  if (rangeHeader && !/^bytes=0-/.test(rangeHeader)) return fileResponse(c, share.file, disposition);
 
-  await prisma.shareLink.delete({ where: { id: shareId } });
-  return c.json({ id: shareId, message: 'Share link revoked' });
+  // Claim one use atomically so concurrent requests cannot exceed max_downloads.
+  const claimed = await prisma.shareLink.updateMany({
+    where: {
+      id: share.id,
+      ...(share.max_downloads ? { download_count: { lt: share.max_downloads } } : {}),
+    },
+    data: { download_count: { increment: 1 } },
+  });
+  if (claimed.count === 0) throw new HttpError(410, 'LIMIT_EXCEEDED', 'Download limit reached');
+
+  await logActivity(share.user_id, 'share.accessed', share.file, { shareId: share.id });
+  return fileResponse(c, share.file, disposition);
 });
