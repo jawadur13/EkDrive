@@ -1,54 +1,29 @@
+import xxhash from 'xxhash-wasm';
 import { prisma } from '../db/client';
+import type { ChunkPlacement } from './storage-engine';
 
-const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE_BYTES || '52428800');
+let hasherPromise: ReturnType<typeof xxhash> | null = null;
 
-export async function computeChecksum(data: Buffer): Promise<string> {
-  const xxhash = await import('xxhash-wasm');
-  const hasher = await xxhash.default();
-  const raw = hasher.h64Raw(new Uint8Array(data));
-  return raw.toString(16);
+// xxhash64 as unpadded lowercase hex. The frontend computes the same value with the same
+// library, so the two must stay in step.
+export async function computeChecksum(data: Uint8Array): Promise<string> {
+  hasherPromise ??= xxhash();
+  const hasher = await hasherPromise;
+  return hasher.h64Raw(data).toString(16);
 }
 
-export function getChunkSize(): number {
-  return CHUNK_SIZE;
-}
-
-export function splitIntoChunks(fileSize: number): Array<{ index: number; size: number }> {
-  const chunks: Array<{ index: number; size: number }> = [];
-  let offset = 0;
-  let index = 0;
-
-  while (offset < fileSize) {
-    const size = Math.min(CHUNK_SIZE, fileSize - offset);
-    chunks.push({ index, size });
-    offset += size;
-    index++;
-  }
-
-  return chunks;
-}
-
-export async function verifyChunkChecksum(chunkData: Buffer, expectedChecksum: string): Promise<boolean> {
-  const actual = await computeChecksum(chunkData);
-  return actual === expectedChecksum;
-}
-
-export async function verifyFileChecksum(chunks: Buffer[], expectedChecksum: string): Promise<boolean> {
-  const combined = Buffer.concat(chunks);
-  const actual = await computeChecksum(combined);
-  return actual === expectedChecksum;
-}
-
-export async function createChunkRecords(fileId: string, placement: Array<{ chunkIndex: number; driveId: string; chunkSize: number }>, checksums: string[]): Promise<void> {
-  const chunkRecords = placement.map((p) => ({
-    file_id: fileId,
-    drive_id: p.driveId,
-    chunk_index: p.chunkIndex,
-    size_bytes: p.chunkSize,
-    checksum: checksums[p.chunkIndex] || '',
-    google_file_id: '',
-    upload_status: 'pending' as const,
-  }));
-
-  await prisma.chunk.createMany({ data: chunkRecords as any });
+// One record per (chunk, drive) — a chunk with replicas has several.
+export async function createChunkRecords(fileId: string, placement: ChunkPlacement[]) {
+  await prisma.chunk.createMany({
+    data: placement.flatMap((p) =>
+      p.driveIds.map((driveId) => ({
+        file_id: fileId,
+        drive_id: driveId,
+        chunk_index: p.chunkIndex,
+        size_bytes: BigInt(p.chunkSize),
+        google_file_id: '',
+        upload_status: 'pending',
+      }))
+    ),
+  });
 }
