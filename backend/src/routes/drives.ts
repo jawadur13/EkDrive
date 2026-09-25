@@ -1,65 +1,41 @@
 import { Hono } from 'hono';
-import { z } from 'zod';
-import { getDrivesByUser, getDriveById, createDrive, deleteDrive } from '../services/drives';
+import { deleteDrive, DriveInUseError, getDriveById, getDrivesByUser } from '../services/drives';
 import { checkDriveHealth } from '../services/drive-health';
+import { HttpError, notFound } from '../utils/errors';
+import { logActivity } from '../services/activity';
 
+// Drives are added through GET /auth/connect (OAuth), not created directly.
 export const driveRoutes = new Hono();
-
-const createDriveSchema = z.object({
-  drive_name: z.string().min(1),
-  google_drive_id: z.string().min(1),
-  root_folder_id: z.string().min(1),
-  oauth_token_encrypted: z.string().optional(),
-  total_quota_bytes: z.number().int().nonnegative().optional(),
-  used_quota_bytes: z.number().int().nonnegative().optional(),
-});
 
 driveRoutes.get('/', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const drives = await getDrivesByUser(userId);
-  return c.json({ drives });
+  return c.json({ drives: await getDrivesByUser(userId) });
 });
 
-driveRoutes.post('/', async (c) => {
+driveRoutes.get('/:driveId{[0-9a-fA-F-]{36}}', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const body = await c.req.json();
-  const parsed = createDriveSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request body' } }, 422);
-  }
-
-  const drive = await createDrive(userId, parsed.data);
-  return c.json(drive, 201);
-});
-
-driveRoutes.get('/:driveId', async (c) => {
-  const userId = (c as any).get('userId') as string;
-  const driveId = c.req.param('driveId');
-
-  const drive = await getDriveById(userId, driveId);
-  if (!drive) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'Drive not found' } }, 404);
-  }
+  const drive = await getDriveById(userId, c.req.param('driveId'));
+  if (!drive) throw notFound('Drive');
   return c.json(drive);
 });
 
-driveRoutes.delete('/:driveId', async (c) => {
+driveRoutes.delete('/:driveId{[0-9a-fA-F-]{36}}', async (c) => {
   const userId = (c as any).get('userId') as string;
   const driveId = c.req.param('driveId');
-
   try {
-    await deleteDrive(userId, driveId);
-    return c.json({ id: driveId, message: 'Drive disconnected' });
-  } catch (error: any) {
-    return c.json({ error: { code: 'NOT_FOUND', message: error.message || 'Drive not found' } }, 404);
+    const drive = await deleteDrive(userId, driveId);
+    if (!drive) throw notFound('Drive');
+    await logActivity(userId, 'drive.disconnected', null, { drive: drive.google_email ?? drive.drive_name });
+  } catch (error) {
+    if (error instanceof DriveInUseError) throw new HttpError(409, 'DRIVE_IN_USE', error.message);
+    throw error;
   }
+  return c.json({ id: driveId, message: 'Drive disconnected' });
 });
 
-driveRoutes.get('/:driveId/health', async (c) => {
-  const driveId = c.req.param('driveId');
-  const health = await checkDriveHealth(driveId);
-  if (!health) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'Drive not found' } }, 404);
-  }
-  return c.json(health);
+driveRoutes.post('/:driveId{[0-9a-fA-F-]{36}}/health', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  const drive = await getDriveById(userId, c.req.param('driveId'));
+  if (!drive) throw notFound('Drive');
+  return c.json(await checkDriveHealth(drive.id));
 });
