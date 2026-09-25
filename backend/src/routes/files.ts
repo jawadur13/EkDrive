@@ -1,98 +1,85 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createFolder, deleteFile, getFileById, listFiles, searchFiles, updateFile, uploadFile } from '../services/files';
-import { getDrivesByUser } from '../services/drives';
+import { createFolder, getBreadcrumbs, getFileById, listFiles, searchFiles, trashFile, updateFile } from '../services/files';
+import { logActivity } from '../services/activity';
+import { repairFile } from '../services/replication';
+import { parseBody } from '../middleware/validation';
+import { notFound } from '../utils/errors';
 
 export const fileRoutes = new Hono();
 
-const createFileSchema = z.object({
+const createFolderSchema = z.object({
   name: z.string().min(1).max(1024),
-  parentFolderId: z.string().uuid().optional(),
-  isFolder: z.boolean().default(false),
-  mimeType: z.string().optional(),
-  sizeBytes: z.number().int().nonnegative().optional(),
-  driveId: z.string().uuid().optional(),
-  googleFileId: z.string().optional(),
+  parentFolderId: z.string().uuid().nullish(),
 });
+
+const updateFileSchema = z
+  .object({
+    name: z.string().min(1).max(1024).optional(),
+    parentFolderId: z.string().uuid().nullable().optional(),
+  })
+  .strict();
 
 fileRoutes.get('/search', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const query = c.req.query('q');
-  if (!query) {
-    return c.json({ results: [] });
-  }
-  const results = await searchFiles(userId, query);
-  return c.json({ query, results });
+  const query = c.req.query('q')?.trim();
+  if (!query) return c.json({ query: '', results: [] });
+  return c.json({ query, results: await searchFiles(userId, query) });
 });
 
 fileRoutes.get('/', async (c) => {
   const userId = (c as any).get('userId') as string;
   const parentFolderId = c.req.query('parentFolderId') || null;
-  const cursor = c.req.query('cursor') || null;
-  const limit = parseInt(c.req.query('limit') || '50');
-
-  const result = await listFiles(userId, parentFolderId, cursor, limit);
-  return c.json(result);
+  const limit = parseInt(c.req.query('limit') || '50') || 50;
+  return c.json(await listFiles(userId, parentFolderId, c.req.query('cursor') || null, limit));
 });
 
-fileRoutes.get('/:fileId', async (c) => {
+// Folders only — file contents go through /upload.
+fileRoutes.post('/', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const fileId = c.req.param('fileId');
+  const { name, parentFolderId } = await parseBody(c, createFolderSchema);
+  const folder = await createFolder(userId, name, parentFolderId ?? null);
+  await logActivity(userId, 'folder.created', folder);
+  return c.json(folder, 201);
+});
 
-  const file = await getFileById(userId, fileId);
-  if (!file) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'File not found' } }, 404);
-  }
+fileRoutes.get('/:fileId{[0-9a-fA-F-]{36}}', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  const file = await getFileById(userId, c.req.param('fileId'));
+  if (!file) throw notFound('File');
   return c.json(file);
 });
 
-fileRoutes.post('/', async (c) => {
+fileRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/breadcrumbs', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const body = await c.req.json();
-  const parsed = createFileSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request body' } }, 422);
-  }
-
-  const { isFolder, name, parentFolderId, mimeType, sizeBytes, driveId, googleFileId } = parsed.data;
-
-  if (isFolder) {
-    const drives = await getDrivesByUser(userId);
-    if (drives.length === 0) {
-      return c.json({ error: { code: 'NO_DRIVES', message: 'No connected drives available' } }, 400);
-    }
-    const result = await createFolder(userId, name, parentFolderId || null, driveId || drives[0].id);
-    return c.json(result, 201);
-  }
-
-  if (!driveId || !googleFileId) {
-    return c.json({ error: { code: 'VALIDATION_ERROR', message: 'driveId and googleFileId required for file upload' } }, 422);
-  }
-  const result = await uploadFile(userId, name, parentFolderId || null, mimeType || 'application/octet-stream', sizeBytes || 0, driveId, googleFileId);
-  return c.json(result, 201);
+  return c.json({ breadcrumbs: await getBreadcrumbs(userId, c.req.param('fileId')) });
 });
 
-fileRoutes.patch('/:fileId', async (c) => {
+fileRoutes.patch('/:fileId{[0-9a-fA-F-]{36}}', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const fileId = c.req.param('fileId');
-  const body = await c.req.json();
-
-  try {
-    const result = await updateFile(userId, fileId, body);
-    return c.json(result);
-  } catch (error: any) {
-    return c.json({ error: { code: 'NOT_FOUND', message: error.message || 'File not found' } }, 404);
+  const data = await parseBody(c, updateFileSchema);
+  const before = await getFileById(userId, c.req.param('fileId'));
+  const updated = await updateFile(userId, c.req.param('fileId'), data);
+  if (before && before.name !== updated.name) await logActivity(userId, 'file.renamed', updated, { from: before.name });
+  if (before && before.parent_id !== updated.parent_id) {
+    await logActivity(userId, 'file.moved', updated, { from: before.virtual_path, to: updated.virtual_path });
   }
+  return c.json(updated);
 });
 
-fileRoutes.delete('/:fileId', async (c) => {
+fileRoutes.delete('/:fileId{[0-9a-fA-F-]{36}}', async (c) => {
   const userId = (c as any).get('userId') as string;
-  const fileId = c.req.param('fileId');
+  const file = await trashFile(userId, c.req.param('fileId'));
+  await logActivity(userId, 'file.trashed', file);
+  return c.json({ id: file.id, message: 'Moved to trash' });
+});
 
-  try {
-    await deleteFile(userId, fileId);
-    return c.json({ id: fileId, message: 'Deleted' });
-  } catch (error: any) {
-    return c.json({ error: { code: 'NOT_FOUND', message: error.message || 'File not found' } }, 404);
-  }
+// Rebuilds missing copies of a file's chunks from the remaining ones.
+fileRoutes.post('/:fileId{[0-9a-fA-F-]{36}}/repair', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  const file = await getFileById(userId, c.req.param('fileId'));
+  if (!file) throw notFound('File');
+  const result = await repairFile(file.id);
+  if (result.copiesAdded > 0 || result.copiesRemoved > 0) await logActivity(userId, 'file.repaired', file, result);
+  return c.json(result);
 });
