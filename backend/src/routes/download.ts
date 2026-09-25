@@ -1,86 +1,29 @@
 import { Hono } from 'hono';
-import { google } from 'googleapis';
 import { prisma } from '../db/client';
-import { createAuthenticatedDriveClient } from '../utils/drive-auth';
-import { computeChecksum } from '../services/chunking';
+import { FILE_STATUS } from '../services/files';
+import { fileResponse } from '../services/file-stream';
+import { HttpError, notFound } from '../utils/errors';
 
 export const downloadRoutes = new Hono();
 
-downloadRoutes.get('/:fileId', async (c) => {
-  const fileId = c.req.param('fileId');
-  const userId = (c as any).get('userId');
+// Types the browser may render inline; everything else is always downloaded.
+const PREVIEWABLE = [/^image\/(png|jpe?g|gif|webp|avif|bmp)$/, /^application\/pdf$/, /^video\//, /^audio\//, /^text\/plain$/];
 
-  const file = await prisma.file.findFirst({
-    where: { id: fileId, user_id: userId },
-    include: { chunks: { orderBy: { chunk_index: 'asc' } } },
-  });
+async function getReadyFile(userId: string, fileId: string) {
+  const file = await prisma.file.findFirst({ where: { id: fileId, user_id: userId, trashed_at: null } });
+  if (!file) throw notFound('File');
+  if (file.is_folder) throw new HttpError(400, 'IS_FOLDER', 'Folders cannot be downloaded');
+  if (file.status !== FILE_STATUS.ready) throw new HttpError(409, 'FILE_INCOMPLETE', 'File upload has not finished');
+  return file;
+}
 
-  if (!file) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'File not found' } }, 404);
-  }
-
-  return c.json({
-    file_id: file.id,
-    name: file.name,
-    size_bytes: file.size_bytes,
-    mime_type: file.mime_type,
-    is_chunked: file.is_chunked,
-    chunk_count: file.chunk_count,
-    checksum: file.checksum,
-    chunks: file.chunks.map((ch) => ({
-      chunk_index: ch.chunk_index,
-      drive_id: ch.drive_id,
-      google_file_id: ch.google_file_id,
-      size_bytes: ch.size_bytes,
-      checksum: ch.checksum,
-      upload_status: ch.upload_status,
-    })),
-  });
+downloadRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/download', async (c) => {
+  const file = await getReadyFile((c as any).get('userId'), c.req.param('fileId'));
+  return fileResponse(c, file, 'attachment');
 });
 
-downloadRoutes.get('/:fileId/chunk/:chunkIndex', async (c) => {
-  const fileId = c.req.param('fileId');
-  const chunkIndex = parseInt(c.req.param('chunkIndex'));
-  const userId = (c as any).get('userId');
-
-  const chunk = await prisma.chunk.findFirst({
-    where: { file_id: fileId, chunk_index: chunkIndex },
-    include: { drive: true },
-  });
-
-  if (!chunk) {
-    return c.json({ error: { code: 'NOT_FOUND', message: 'Chunk not found' } }, 404);
-  }
-
-  if (chunk.upload_status !== 'uploaded') {
-    return c.json({ error: { code: 'NOT_READY', message: 'Chunk not yet uploaded' } }, 404);
-  }
-
-  const { client, tokens } = await createAuthenticatedDriveClient(chunk.drive.user_id);
-  if (!tokens?.access_token) {
-    return c.json({ error: { code: 'DRIVE_OFFLINE', message: 'Target drive is not accessible' } }, 503);
-  }
-
-  const driveApi = google.drive({ version: 'v3', auth: client as any });
-
-  try {
-    const response = await driveApi.files.get(
-      { fileId: chunk.google_file_id, alt: 'media' },
-      { responseType: 'arraybuffer' }
-    );
-
-    const chunkData = Buffer.from(response.data as ArrayBuffer);
-    const actualChecksum = await computeChecksum(chunkData);
-
-    if (actualChecksum !== chunk.checksum) {
-      return c.json({ error: { code: 'CHECKSUM_MISMATCH', message: 'Chunk integrity check failed' } }, 500);
-    }
-
-    return c.body(chunkData, 200, {
-      'Content-Type': 'application/octet-stream',
-      'Content-Length': chunkData.length.toString(),
-    });
-  } catch (error) {
-    return c.json({ error: { code: 'DRIVE_ERROR', message: 'Failed to fetch chunk from Google Drive' } }, 502);
-  }
+downloadRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/preview', async (c) => {
+  const file = await getReadyFile((c as any).get('userId'), c.req.param('fileId'));
+  const inline = PREVIEWABLE.some((re) => re.test(file.mime_type ?? ''));
+  return fileResponse(c, file, inline ? 'inline' : 'attachment');
 });
