@@ -1,5 +1,7 @@
 # EkDrive — Production Readiness Audit Summary
 
+> **Update 2026-09-22:** The findings below have been fixed, and the missing features are now built: Trash, Activity, Notifications, Analytics, rebalancing, self-repair and range streaming. See README → "Known limitations". Treat this document as history, not as the current state.
+
 This document aggregates the findings from the nine module audits (01–09) into a single production-readiness verdict.
 
 **Overall verdict: NOT production ready.** The project is an early-stage prototype. The backend contains two disconnected layers — real service implementations (`services/*.ts`) and placeholder route handlers (`routes/*.ts`) — and the routes largely do not call the services. As a result most advertised features are non-functional end-to-end.
