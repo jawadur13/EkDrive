@@ -1,13 +1,19 @@
 import { create } from 'zustand';
 import api from '../services/api';
 
+export interface User {
+  id: string;
+  email: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  storageMode: string;
+}
+
 interface AuthState {
-  user: { id: string; email: string; displayName: string } | null;
+  user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: () => void;
-  logout: () => void;
-  setUser: (user: { id: string; email: string; displayName: string } | null) => void;
+  logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
 }
 
@@ -15,21 +21,17 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
   isLoading: true,
-  login: () => {
-    window.location.href = '/api/v1/auth/login';
-  },
-  logout: () => {
-    document.cookie = 'access_token=; Max-Age=0; path=/; secure; samesite=strict';
+  logout: async () => {
+    // The cookie is HttpOnly, so only the server can clear it.
+    await api.post('/auth/logout').catch(() => {});
     set({ user: null, isAuthenticated: false });
-  },
-  setUser: (user) => {
-    set({ user, isAuthenticated: !!user, isLoading: false });
+    window.location.href = '/login';
   },
   checkAuth: async () => {
     try {
       const res = await api.get('/auth/me');
       set({ user: res.data.user, isAuthenticated: true, isLoading: false });
-    } catch (error) {
+    } catch {
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
   },

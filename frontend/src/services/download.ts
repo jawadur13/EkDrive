@@ -1,13 +1,13 @@
-import api from './api';
+// Plain URLs: the browser streams these directly, with the session cookie attached.
 
 export function getDownloadUrl(fileId: string) {
-  return `/files/${fileId}/download`;
+  return `/api/v1/files/${fileId}/download`;
 }
 
-export async function getFileInfo(fileId: string) {
-  return api.get(`/files/${fileId}`).then((r) => r.data);
+export function getPreviewUrl(fileId: string) {
+  return `/api/v1/files/${fileId}/preview`;
 }
 
-export async function getChunkInfo(fileId: string, chunkIndex: number) {
-  return api.get(`/files/${fileId}/chunk/${chunkIndex}`).then((r) => r.data);
+export function getShareUrl(token: string) {
+  return `${window.location.origin}/api/v1/shares/public/${token}/content`;
 }
