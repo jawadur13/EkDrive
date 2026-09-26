@@ -7,7 +7,9 @@ import { useAuthStore } from './stores/authStore';
 const FileList = lazy(() => import('./pages/FileList'));
 const Login = lazy(() => import('./pages/Login'));
 const Settings = lazy(() => import('./pages/Settings'));
-const AuthCallback = lazy(() => import('./pages/AuthCallback'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Trash = lazy(() => import('./pages/Trash'));
+const Activity = lazy(() => import('./pages/Activity'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore();
@@ -65,6 +67,10 @@ function App() {
                     <Route path="/files" element={<ProtectedRoute><FileList /></ProtectedRoute>} />
                     <Route path="/files/:folderId" element={<ProtectedRoute><FileList /></ProtectedRoute>} />
                     <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+                    <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                    <Route path="/trash" element={<ProtectedRoute><Trash /></ProtectedRoute>} />
+                    <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
+                    <Route path="*" element={<Navigate to="/files" replace />} />
                   </Routes>
                 </Suspense>
               </div>
@@ -77,7 +83,6 @@ function App() {
           <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="flex items-center gap-2 text-gray-400"><div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /><span className="text-sm">Loading...</span></div></div>}>
             <Routes>
               <Route path="/login" element={<Login />} />
-              <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
           </Suspense>

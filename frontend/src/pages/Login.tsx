@@ -1,9 +1,18 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
+
+const ERROR_MESSAGES: Record<string, string> = {
+  access_denied: 'Google sign-in was cancelled.',
+  invalid_state: 'The sign-in link expired. Please try again.',
+  unverified_email: 'Your Google account email is not verified.',
+  drive_in_use: 'This Google account is already connected to another EkDrive user.',
+};
 
 export default function Login() {
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const errorCode = searchParams.get('error');
+  const error = errorCode ? ERROR_MESSAGES[errorCode] ?? 'Sign-in failed. Please try again.' : null;
 
   const handleGoogleLogin = () => {
     setLoading(true);
@@ -22,6 +31,8 @@ export default function Login() {
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">EkDrive</h1>
           <p className="mt-2 text-sm text-gray-500">Connect your Google Drive accounts and manage them as one unified storage.</p>
         </div>
+
+        {error && <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
         <div className="card p-8">
           <button onClick={handleGoogleLogin} disabled={loading} className="btn-primary w-full py-3 text-base">
@@ -42,7 +53,7 @@ export default function Login() {
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-400">
-          Secure access with Google OAuth 2.0
+          The account you sign in with becomes your first drive. Add more in Settings.
         </p>
       </div>
     </div>
