@@ -10,6 +10,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Trash = lazy(() => import('./pages/Trash'));
 const Activity = lazy(() => import('./pages/Activity'));
+const Health = lazy(() => import('./pages/Health'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuthStore();
@@ -70,6 +71,7 @@ function App() {
                     <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                     <Route path="/trash" element={<ProtectedRoute><Trash /></ProtectedRoute>} />
                     <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
+                    <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
                     <Route path="*" element={<Navigate to="/files" replace />} />
                   </Routes>
                 </Suspense>

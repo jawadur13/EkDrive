@@ -80,3 +80,22 @@ export async function getAllDriveHealth(userId: string) {
     last_health_check: drive.last_health_check,
   }));
 }
+
+// Recent checks plus the uptime they imply, for the drive detail view.
+export async function getDriveHealthHistory(driveId: string, limit = 30) {
+  const take = Math.min(Math.max(limit, 1), 200);
+  const checks = await prisma.healthCheck.findMany({
+    where: { drive_id: driveId },
+    orderBy: { checked_at: 'desc' },
+    take,
+  });
+  const online = checks.filter((c) => c.status !== DRIVE_STATUS.offline).length;
+  const latencies = checks.filter((c) => c.latency_ms !== null).map((c) => c.latency_ms!);
+
+  return {
+    checks,
+    uptimePercent: checks.length > 0 ? (online / checks.length) * 100 : null,
+    averageLatencyMs: latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : null,
+    lastError: checks.find((c) => c.error_message)?.error_message ?? null,
+  };
+}

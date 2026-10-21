@@ -208,3 +208,61 @@ export async function runExclusiveRebalance(userId: string) {
     running.delete(userId);
   }
 }
+
+export type FileIssue = {
+  fileId: string;
+  name: string;
+  virtualPath: string;
+  sizeBytes: bigint | null;
+  redundancyCopies: number;
+  /** Chunks with no readable copy left: the file cannot be fully downloaded. */
+  lostChunks: number;
+  /** Chunks that still have a copy but fewer than the file asks for. */
+  degradedChunks: number;
+  repairable: boolean;
+};
+
+// Files whose chunks are not all stored the way the file asks for — what the user sees as
+// "needs attention". Bounded so one broken drive cannot produce an unbounded response.
+export async function listFileIssues(userId: string, limit = 100): Promise<FileIssue[]> {
+  const affected = await prisma.chunk.groupBy({
+    by: ['file_id'],
+    where: {
+      upload_status: { not: 'uploaded' },
+      file: { user_id: userId, trashed_at: null, status: FILE_STATUS.ready },
+    },
+    _count: true,
+    orderBy: { file_id: 'asc' },
+    take: limit,
+  });
+  if (affected.length === 0) return [];
+
+  const files = await prisma.file.findMany({ where: { id: { in: affected.map((a) => a.file_id) } } });
+  const chunks = await prisma.chunk.findMany({ where: { file_id: { in: files.map((f) => f.id) } } });
+
+  return files.map((file) => {
+    const byIndex = new Map<number, number>();
+    for (const chunk of chunks) {
+      if (chunk.file_id !== file.id) continue;
+      const uploaded = chunk.upload_status === 'uploaded' ? 1 : 0;
+      byIndex.set(chunk.chunk_index, (byIndex.get(chunk.chunk_index) ?? 0) + uploaded);
+    }
+    let lost = 0;
+    let degraded = 0;
+    for (let i = 0; i < file.chunk_count; i++) {
+      const copies = byIndex.get(i) ?? 0;
+      if (copies === 0) lost++;
+      else if (copies < file.redundancy_copies) degraded++;
+    }
+    return {
+      fileId: file.id,
+      name: file.name,
+      virtualPath: file.virtual_path,
+      sizeBytes: file.size_bytes,
+      redundancyCopies: file.redundancy_copies,
+      lostChunks: lost,
+      degradedChunks: degraded,
+      repairable: lost === 0 && degraded > 0,
+    };
+  });
+}

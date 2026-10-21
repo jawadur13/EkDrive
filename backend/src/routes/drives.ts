@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { deleteDrive, DriveInUseError, getDriveById, getDrivesByUser } from '../services/drives';
-import { checkDriveHealth } from '../services/drive-health';
+import { checkDriveHealth, getDriveHealthHistory } from '../services/drive-health';
 import { HttpError, notFound } from '../utils/errors';
 import { logActivity } from '../services/activity';
 
@@ -38,4 +38,13 @@ driveRoutes.post('/:driveId{[0-9a-fA-F-]{36}}/health', async (c) => {
   const drive = await getDriveById(userId, c.req.param('driveId'));
   if (!drive) throw notFound('Drive');
   return c.json(await checkDriveHealth(drive.id));
+});
+
+// Recent health checks for one drive, newest first.
+driveRoutes.get('/:driveId{[0-9a-fA-F-]{36}}/health', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  const drive = await getDriveById(userId, c.req.param('driveId'));
+  if (!drive) throw notFound('Drive');
+  const limit = parseInt(c.req.query('limit') || '30') || 30;
+  return c.json(await getDriveHealthHistory(drive.id, limit));
 });

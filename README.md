@@ -14,6 +14,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 | Storage modes, rebalancing, self-repair | Working |
 | Drive health, change sync | Working |
 | Activity log, notifications, analytics dashboard | Working |
+| Health page: conflicts, repair, per-drive uptime history | Working |
 
 ## How it works
 
@@ -81,13 +82,14 @@ All routes are under `/api/v1` and need the session cookie, except `/auth/login`
 | Group | Routes |
 |---|---|
 | `auth` | `login`, `callback`, `connect`, `me`, `logout` |
-| `files` | list, search, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/preview`, `:id/repair` |
+| `files` | list, search, issues, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/preview`, `:id/repair` |
 | `upload` | `init`, `:id/chunk/:index`, `:id/complete`, abort |
 | `trash` | list, restore, delete one, empty |
 | `drives` | list, get, disconnect, health check |
 | `storage-mode` | get, set, rebalance |
 | `shares` | create, list, revoke, `public/:token`, `public/:token/content` |
 | `sync` | status, trigger, conflicts, resolve |
+| `drives/:id/health` | `POST` runs a check, `GET` returns recent checks with uptime |
 | `activity`, `notifications`, `analytics` | activity feed, notification list/read, dashboard figures |
 
 ## Project layout

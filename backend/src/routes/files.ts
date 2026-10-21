@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createFolder, getBreadcrumbs, getFileById, listFiles, searchFiles, trashFile, updateFile } from '../services/files';
 import { logActivity } from '../services/activity';
-import { repairFile } from '../services/replication';
+import { listFileIssues, repairFile } from '../services/replication';
 import { parseBody } from '../middleware/validation';
 import { notFound } from '../utils/errors';
 
@@ -25,6 +25,12 @@ fileRoutes.get('/search', async (c) => {
   const query = c.req.query('q')?.trim();
   if (!query) return c.json({ query: '', results: [] });
   return c.json({ query, results: await searchFiles(userId, query) });
+});
+
+// Files whose chunks are not all stored as the file asks for.
+fileRoutes.get('/issues', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  return c.json({ issues: await listFileIssues(userId) });
 });
 
 fileRoutes.get('/', async (c) => {

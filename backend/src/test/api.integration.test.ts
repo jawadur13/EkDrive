@@ -378,6 +378,67 @@ describe('repair and rebalance', () => {
   });
 });
 
+describe('health page data', () => {
+  it('lists files with missing copies, repairs them, and then reports nothing', async () => {
+    await api.put('/storage-mode', { mode: 'high_reliability' });
+    const data = new Uint8Array(randomBytes(1200));
+    const { fileId } = await upload(api, data, 'issues.bin');
+    await api.put('/storage-mode', { mode: 'balanced' });
+
+    expect((await (await api.get('/files/issues')).json() as any).issues).toEqual([]);
+
+    // One copy of chunk 0 disappears from "Google", as sync would record it.
+    const victim = (await prisma.chunk.findMany({ where: { file_id: fileId, chunk_index: 0 } }))[0];
+    chunkStore.__blobs.delete(victim.google_file_id);
+    await prisma.chunk.update({ where: { id: victim.id }, data: { upload_status: 'missing' } });
+
+    const issues = (await (await api.get('/files/issues')).json() as any).issues;
+    const issue = issues.find((i: any) => i.fileId === fileId);
+    expect(issue).toMatchObject({ name: 'issues.bin', lostChunks: 0, degradedChunks: 1, repairable: true });
+
+    expect((await api.post(`/files/${fileId}/repair`)).status).toBe(200);
+    const after = (await (await api.get('/files/issues')).json() as any).issues;
+    expect(after.find((i: any) => i.fileId === fileId)).toBeUndefined();
+  });
+
+  it('serves per-drive health history with uptime', async () => {
+    const drive = (await (await api.get('/drives')).json() as any).drives[0];
+    await prisma.healthCheck.createMany({
+      data: [
+        { drive_id: drive.id, user_id: owner.user.id, status: 'online', latency_ms: 100 },
+        { drive_id: drive.id, user_id: owner.user.id, status: 'offline', latency_ms: 300, error_message: 'boom' },
+      ],
+    });
+
+    const res = await api.get(`/drives/${drive.id}/health`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.checks.length).toBeGreaterThanOrEqual(2);
+    expect(body.uptimePercent).toBeLessThan(100);
+    expect(body.averageLatencyMs).toBeGreaterThan(0);
+    expect(body.lastError).toBe('boom');
+  });
+
+  it('keeps one user out of the health history of another', async () => {
+    const drive = (await (await api.get('/drives')).json() as any).drives[0];
+    expect((await client(other.token).get(`/drives/${drive.id}/health`)).status).toBe(404);
+  });
+
+  it('resolves a sync conflict', async () => {
+    const { fileId } = await upload(api, new Uint8Array(randomBytes(200)), 'conflict.bin');
+    const entry = await prisma.syncEntry.create({
+      data: { user_id: owner.user.id, file_id: fileId, operation: 'delete', sync_status: 'conflict' },
+    });
+
+    const listed = (await (await api.get('/sync/conflicts')).json() as any).conflicts;
+    expect(listed.map((c: any) => c.id)).toContain(entry.id);
+
+    const res = await api.post(`/sync/conflicts/${entry.id}/resolve`, { resolution: 'local' });
+    expect(res.status).toBe(200);
+    expect((await (await api.get('/sync/conflicts')).json() as any).conflicts.map((c: any) => c.id)).not.toContain(entry.id);
+  });
+});
+
 describe('activity, notifications, analytics', () => {
   it('records what the user did', async () => {
     const body = (await (await api.get('/activity?limit=100')).json()) as any;

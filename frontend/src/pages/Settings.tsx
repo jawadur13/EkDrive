@@ -17,7 +17,7 @@ const CALLBACK_MESSAGES: Record<string, string> = {
   session_expired: 'Your session expired while connecting. Sign in and try again.',
 };
 
-function DriveRow({ drive, onError }: { drive: Drive; onError: (message: string) => void }) {
+function DriveRow({ drive, onError, onReconnect }: { drive: Drive; onError: (message: string) => void; onReconnect: () => void }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const used = drive.used_quota_bytes ?? 0;
@@ -52,6 +52,11 @@ function DriveRow({ drive, onError }: { drive: Drive; onError: (message: string)
           {drive.last_health_check && ` · checked ${timeAgo(drive.last_health_check)}`}
         </p>
       </div>
+      {drive.status === 'offline' && (
+        <button className="btn-secondary" disabled={busy} onClick={onReconnect}>
+          Reconnect
+        </button>
+      )}
       <button className="btn-secondary" disabled={busy} onClick={() => act(() => api.post(`/drives/${drive.id}/health`))}>
         Check
       </button>
@@ -153,7 +158,7 @@ export default function Settings() {
           {drives.isLoading ? (
             <div className="py-6"><div className="skeleton h-10 w-full" /></div>
           ) : drives.data?.length ? (
-            drives.data.map((drive) => <DriveRow key={drive.id} drive={drive} onError={setError} />)
+            drives.data.map((drive) => <DriveRow key={drive.id} drive={drive} onError={setError} onReconnect={handleConnectDrive} />)
           ) : (
             <p className="py-8 text-center text-sm text-gray-400">No drives connected yet.</p>
           )}
