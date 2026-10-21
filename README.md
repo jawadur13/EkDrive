@@ -26,11 +26,11 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 - **Folders** are virtual — they exist only in EkDrive's database, so moving and renaming never touches Google Drive.
 - **Trash.** Deleting moves an item to the trash for 30 days. Trashed files keep using Google space until they are purged.
 - **Self-repair.** When a chunk is deleted outside EkDrive, sync marks that copy missing, rebuilds it from another copy and notifies you. A file with no copy left is reported as damaged. `POST /api/v1/files/:id/repair` runs a repair on demand.
-- **Background jobs** (need Redis): drive health every 15 minutes, change sync every 10 minutes, and a daily cleanup of abandoned uploads, expired trash, expired share links and old health records.
+- **Background jobs**: drive health every 15 minutes, change sync every 10 minutes, and a daily cleanup of abandoned uploads, expired trash, expired share links and old records. They run on timers inside the backend process; with `REDIS_URL` set they run as BullMQ repeatable jobs instead, which survives a restart mid-job and spreads the work across instances.
 
 ## Development setup
 
-Requirements: Node 22+, pnpm 10, a PostgreSQL database, and a Google Cloud OAuth client (web application). Redis is optional.
+Requirements: Node 22+, pnpm 10, a PostgreSQL database, and a Google Cloud OAuth client (web application). Redis is optional — without it the background jobs run in-process.
 
 ```bash
 pnpm install
@@ -52,7 +52,7 @@ Every variable lives in `.env.local` at the repo root; `.env.example` documents 
 | `DATABASE_URL` | yes | PostgreSQL connection string |
 | `JWT_SECRET`, `ENCRYPTION_KEY`, `ENCRYPTION_SALT` | yes | The backend refuses to start without them |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | yes | OAuth client for a web application |
-| `REDIS_URL` | no | A `redis://` or `rediss://` TCP URL. Without it, background jobs stay off |
+| `REDIS_URL` | no | A `redis://` or `rediss://` TCP URL. Without it, jobs run on in-process timers |
 | `BACKEND_URL`, `CORS_ORIGIN`, `PORT` | no | Defaults are localhost 3000 / 5173 |
 | `CHUNK_SIZE_BYTES` | no | 50 MB by default |
 | `RATE_LIMIT_MAX`, `TRUST_PROXY` | no | `TRUST_PROXY=true` only behind a proxy you control |
@@ -113,6 +113,7 @@ audit/              readiness audits
 ## Known limitations
 
 - Rebalance runs inside the backend process, one at a time per user. A restart during a rebalance stops it; running it again continues where it stopped.
+- Without `REDIS_URL` the scheduled jobs live in the backend process, so they assume a single instance and a job interrupted by a restart waits for its next tick.
 - Moving a chunk during a rebalance can interrupt a download of that file that is already in progress.
 - Rename, new-folder and delete prompts use the browser's built-in dialogs.
 - The rate limiter keeps its counts in memory, so it is only correct with a single backend instance.

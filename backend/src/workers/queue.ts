@@ -10,22 +10,39 @@ import { WRITABLE_DRIVE_STATUSES } from '../services/drives';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-type Job = { name: string; everyMs: number; run: () => Promise<unknown> };
+type Job = {
+  name: string;
+  everyMs: number;
+  /** Delay before the first run after boot, so a restart loop cannot hammer Google. */
+  firstRunMs: number;
+  run: () => Promise<unknown>;
+};
 
-// Each job runs on its own schedule in a single 'maintenance' queue.
-const JOBS: Job[] = [
+// Each job runs on its own schedule. With Redis they are BullMQ repeatable jobs; without it
+// they run on timers inside this process (see startWorkers).
+export const JOBS: Job[] = [
   {
     name: 'health-all',
     everyMs: 15 * 60 * 1000,
+    firstRunMs: 20 * 1000,
     run: async () => {
       const drives = await prisma.drive.findMany({ select: { id: true } });
-      for (const { id } of drives) await checkDriveHealth(id);
-      return { checked: drives.length };
+      let failed = 0;
+      for (const { id } of drives) {
+        try {
+          await checkDriveHealth(id);
+        } catch (error) {
+          failed++;
+          console.warn(`Health check failed for drive ${id}:`, error);
+        }
+      }
+      return { checked: drives.length - failed, failed };
     },
   },
   {
     name: 'sync-all',
     everyMs: 10 * 60 * 1000,
+    firstRunMs: 60 * 1000,
     run: async () => {
       const drives = await prisma.drive.findMany({ where: { status: { in: WRITABLE_DRIVE_STATUSES } } });
       let failed = 0;
@@ -43,6 +60,9 @@ const JOBS: Job[] = [
   {
     name: 'cleanup',
     everyMs: DAY_MS,
+    // Runs soon after boot: on a process that restarts often this is the only chance the
+    // daily work gets, and trash that is never purged leaks Google storage.
+    firstRunMs: 2 * 60 * 1000,
     run: async () => {
       // Uploads abandoned for a day: remove the file record and any chunks already stored.
       const stale = await prisma.file.findMany({
@@ -71,28 +91,87 @@ const JOBS: Job[] = [
 
       const shares = await prisma.shareLink.deleteMany({ where: { expires_at: { lt: new Date() } } });
       const checks = await prisma.healthCheck.deleteMany({ where: { checked_at: { lt: new Date(Date.now() - 90 * DAY_MS) } } });
-      return { staleUploads: stale.length, purgedTrash: purged, expiredShares: shares.count, oldHealthChecks: checks.count };
+      const syncEntries = await prisma.syncEntry.deleteMany({
+        where: { sync_status: { not: 'conflict' }, created_at: { lt: new Date(Date.now() - 30 * DAY_MS) } },
+      });
+      return {
+        staleUploads: stale.length,
+        purgedTrash: purged,
+        expiredShares: shares.count,
+        oldHealthChecks: checks.count,
+        oldSyncEntries: syncEntries.count,
+      };
     },
   },
 ];
+
+export type JobDefinition = Job;
+export type StopWorkers = () => Promise<void>;
 
 function createConnection() {
   const url = process.env.REDIS_URL;
   if (!url) return null;
   if (!/^rediss?:\/\//.test(url)) {
-    console.warn('REDIS_URL must be a redis:// or rediss:// URL (for Upstash, use the TCP URL, not the REST URL); background jobs disabled');
+    console.warn(
+      'REDIS_URL is not a redis:// or rediss:// URL (for Upstash, use the TCP URL, not the REST URL); falling back to the in-process scheduler'
+    );
     return null;
   }
   return new IORedis(url, { maxRetriesPerRequest: null });
 }
 
-export async function startWorkers() {
-  const connection = createConnection();
-  if (!connection) {
-    console.warn('Redis not configured; health checks, sync and cleanup will not run in the background');
-    return async () => {};
+async function runJob(job: Job) {
+  const startedAt = Date.now();
+  try {
+    const result = await job.run();
+    console.log(`job ${job.name} finished in ${Date.now() - startedAt}ms`, result);
+    return result;
+  } catch (error) {
+    console.error(`job ${job.name} failed after ${Date.now() - startedAt}ms:`, error);
+    throw error;
   }
+}
 
+// Timers in this process. Correct for a single instance, which is what the rate limiter and
+// the rebalance lock already assume; with several instances configure Redis so BullMQ runs
+// each job once across the fleet.
+export function startInProcessScheduler(jobs: Job[] = JOBS): StopWorkers {
+  const timers: NodeJS.Timeout[] = [];
+  const running = new Set<string>();
+
+  const schedule = (job: Job) => {
+    const tick = async () => {
+      // A slow run must not overlap with the next tick.
+      if (running.has(job.name)) {
+        console.warn(`job ${job.name} is still running; skipping this tick`);
+        return;
+      }
+      running.add(job.name);
+      try {
+        await runJob(job);
+      } catch {
+        // runJob already logged it; the next tick retries.
+      } finally {
+        running.delete(job.name);
+      }
+    };
+
+    timers.push(setTimeout(() => {
+      void tick();
+      timers.push(setInterval(() => void tick(), job.everyMs));
+    }, job.firstRunMs));
+  };
+
+  jobs.forEach(schedule);
+  console.log(`Background jobs scheduled in-process: ${jobs.map((j) => j.name).join(', ')}`);
+
+  return async () => {
+    for (const timer of timers) clearTimeout(timer as NodeJS.Timeout);
+    timers.length = 0;
+  };
+}
+
+async function startBullWorkers(connection: IORedis): Promise<StopWorkers> {
   const queue = new Queue('maintenance', { connection });
   for (const job of JOBS) {
     await queue.upsertJobScheduler(job.name, { every: job.everyMs }, { name: job.name });
@@ -103,15 +182,30 @@ export async function startWorkers() {
     async (job) => {
       const definition = JOBS.find((j) => j.name === job.name);
       if (!definition) throw new Error(`Unknown job: ${job.name}`);
-      return definition.run();
+      return runJob(definition);
     },
     { connection, concurrency: 1 }
   );
   worker.on('failed', (job, error) => console.error(`Job ${job?.name} failed:`, error));
+  console.log(`Background jobs scheduled on Redis: ${JOBS.map((j) => j.name).join(', ')}`);
 
   return async () => {
     await worker.close();
     await queue.close();
     connection.disconnect();
   };
+}
+
+// Redis spreads the jobs across instances and survives a restart mid-job; without it the same
+// jobs still run, just inside this process.
+export async function startWorkers(): Promise<StopWorkers> {
+  const connection = createConnection();
+  if (!connection) return startInProcessScheduler();
+  try {
+    return await startBullWorkers(connection);
+  } catch (error) {
+    console.warn('Could not reach Redis; falling back to the in-process scheduler:', error);
+    connection.disconnect();
+    return startInProcessScheduler();
+  }
 }
