@@ -25,7 +25,8 @@ function DriveRow({ drive, onError, onReconnect }: { drive: Drive; onError: (mes
   const used = drive.used_quota_bytes ?? 0;
   const total = drive.total_quota_bytes;
   const percent = total ? Math.min(100, (used / total) * 100) : 0;
-  const badge = drive.status === 'online' ? 'badge-online' : drive.status === 'degraded' ? 'badge-degraded' : 'badge-offline';
+  const badge = drive.status === 'online' ? 'badge-online' : drive.status === 'offline' ? 'badge-offline' : 'badge-degraded';
+  const statusLabel = drive.status === 'quota_exceeded' ? 'full' : drive.status;
 
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -44,7 +45,7 @@ function DriveRow({ drive, onError, onReconnect }: { drive: Drive; onError: (mes
       <div className="flex-1 min-w-[12rem]">
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-gray-900 truncate">{drive.google_email ?? drive.drive_name}</p>
-          <span className={`badge ${badge}`}>{drive.status}</span>
+          <span className={`badge ${badge}`}>{statusLabel}</span>
         </div>
         <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
           <div className="h-full bg-blue-600" style={{ width: `${percent}%` }} />

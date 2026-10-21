@@ -3,8 +3,8 @@ import { getDriveApi } from '../utils/drive-auth';
 import { DRIVE_STATUS, quotaFromAbout } from './drives';
 import { notify } from './notifications';
 
-// Below this much free space a drive is marked degraded (still writable, but flagged).
-const LOW_SPACE_RATIO = 0.01;
+// Below this much free space a drive is flagged. It stays writable until it is actually full.
+const LOW_SPACE_RATIO = 0.1;
 
 export async function checkDriveHealth(driveId: string) {
   const drive = await prisma.drive.findUnique({ where: { id: driveId } });
@@ -19,8 +19,10 @@ export async function checkDriveHealth(driveId: string) {
     // The client refreshes an expired access token on its own and persists the new one.
     const about = await getDriveApi(drive).about.get({ fields: 'storageQuota(limit,usage)' });
     quota = quotaFromAbout(about.data.storageQuota);
-    if (quota.total_quota_bytes && Number(quota.available_quota_bytes) / Number(quota.total_quota_bytes) < LOW_SPACE_RATIO) {
-      status = DRIVE_STATUS.degraded;
+    if (quota.total_quota_bytes) {
+      const free = Number(quota.available_quota_bytes) / Number(quota.total_quota_bytes);
+      if (quota.available_quota_bytes === 0n) status = DRIVE_STATUS.quota_exceeded;
+      else if (free < LOW_SPACE_RATIO) status = DRIVE_STATUS.degraded;
     }
   } catch (error: any) {
     status = DRIVE_STATUS.offline;
@@ -53,6 +55,13 @@ export async function checkDriveHealth(driveId: string) {
         severity: 'error',
         title: `${name} is unreachable`,
         body: `New uploads skip this drive. If it stays offline, reconnect it in Settings. (${errorMessage})`,
+      });
+    } else if (status === DRIVE_STATUS.quota_exceeded) {
+      await notify(drive.user_id, {
+        type: 'drive.degraded',
+        severity: 'error',
+        title: `${name} is full`,
+        body: 'New chunks will go to your other drives until space is freed.',
       });
     } else if (status === DRIVE_STATUS.degraded) {
       await notify(drive.user_id, { type: 'drive.degraded', severity: 'warning', title: `${name} is almost full` });

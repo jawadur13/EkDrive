@@ -19,7 +19,6 @@ model User {
   created_at    DateTime @default(now()) @db.Timestamp(6)
   updated_at    DateTime @default(now()) @db.Timestamp(6)
 
-  authToken     AuthToken?
   drives        Drive[]
   files         File[]
   storageMode   StorageMode?
@@ -28,19 +27,6 @@ model User {
   syncEntries   SyncEntry[]
   activities    Activity[]
   notifications Notification[]
-}
-
-model AuthToken {
-  id            String   @id @default(uuid()) @db.Uuid
-  user_id       String   @unique @db.Uuid
-  access_token  String   @db.Text
-  refresh_token String   @db.Text
-  token_expiry  DateTime @db.Timestamp(6)
-  scopes        String[]
-  created_at    DateTime @default(now()) @db.Timestamp(6)
-  revoked_at    DateTime? @db.Timestamp(6)
-
-  user User @relation(fields: [user_id], references: [id])
 }
 
 model Drive {
@@ -82,8 +68,6 @@ model File {
   mime_type       String?  @db.VarChar(255)
   size_bytes      BigInt?
   checksum        String?  @db.VarChar(64)
-  google_file_ids String[]
-  drive_assignments Json?
   chunk_count     Int      @default(0)
   is_chunked      Boolean  @default(false)
   redundancy_copies Int    @default(1)

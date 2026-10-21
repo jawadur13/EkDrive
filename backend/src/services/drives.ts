@@ -6,7 +6,10 @@ import { createOAuthClient, getDriveOAuthClient } from '../utils/drive-auth';
 // Drive.status values. Health checks write these; placement only uses 'online' and 'degraded'.
 export const DRIVE_STATUS = {
   online: 'online',
+  /** Reachable but nearly full. */
   degraded: 'degraded',
+  /** Reachable and completely full: readable, but nothing new can be written to it. */
+  quota_exceeded: 'quota_exceeded',
   offline: 'offline',
 } as const;
 

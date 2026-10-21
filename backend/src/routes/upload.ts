@@ -8,8 +8,8 @@ import { parseBody } from '../middleware/validation';
 import { assignChunksToDrives, getChunkCount, getReplicaCount } from '../services/storage-engine';
 import { computeChecksum, createChunkRecords } from '../services/chunking';
 import { uploadChunkToDrive } from '../services/chunk-store';
-import { adjustDriveUsage, findFallbackDrive } from '../services/drives';
-import { buildVirtualPath, FILE_STATUS, removeFiles, resolveParentFolder, validateName } from '../services/files';
+import { adjustDriveUsage, findFallbackDrive, WRITABLE_DRIVE_STATUSES } from '../services/drives';
+import { buildVirtualPath, FILE_STATUS, removeFiles, resolveParentFolder, uniqueNameInFolder, validateName } from '../services/files';
 import { getStorageMode } from '../services/storage-mode';
 import { HttpError, notFound } from '../utils/errors';
 import { logActivity } from '../services/activity';
@@ -35,8 +35,8 @@ async function getUploadingFile(userId: string, fileId: string) {
 uploadRoutes.post('/init', async (c) => {
   const userId = (c as any).get('userId') as string;
   const body = await parseBody(c, initSchema);
-  const name = validateName(body.name);
   const parent = await resolveParentFolder(userId, body.parentFolderId);
+  const name = await uniqueNameInFolder(userId, parent?.id ?? null, validateName(body.name));
 
   if (body.sizeBytes > env.maxFileSize) {
     throw new HttpError(413, 'FILE_TOO_LARGE', `Files are limited to ${env.maxFileSize} bytes`);
@@ -45,7 +45,27 @@ uploadRoutes.post('/init', async (c) => {
   const storageMode = await getStorageMode(userId);
   const placement = await assignChunksToDrives(userId, body.sizeBytes, storageMode.mode as any, storageMode.min_replicas);
   if (!placement) {
-    return c.json({ error: { code: 'INSUFFICIENT_STORAGE', message: 'Not enough space across connected drives for this file in the current storage mode' } }, 507);
+    const drives = await prisma.drive.findMany({
+      where: { user_id: userId, status: { in: WRITABLE_DRIVE_STATUSES } },
+      select: { id: true, google_email: true, drive_name: true, available_quota_bytes: true },
+    });
+    const available = drives.reduce((sum, d) => sum + (d.available_quota_bytes ?? 0n), 0n);
+    const copies = getReplicaCount(storageMode.mode, storageMode.min_replicas);
+    return c.json(
+      {
+        error: {
+          code: 'INSUFFICIENT_STORAGE',
+          message: 'Not enough space across connected drives for this file in the current storage mode',
+          details: {
+            requiredBytes: body.sizeBytes * copies,
+            availableBytes: available,
+            copiesPerChunk: copies,
+            drives: drives.map((d) => ({ id: d.id, name: d.google_email ?? d.drive_name, availableBytes: d.available_quota_bytes })),
+          },
+        },
+      },
+      507
+    );
   }
 
   const chunkCount = getChunkCount(body.sizeBytes);

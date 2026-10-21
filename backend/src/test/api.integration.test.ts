@@ -133,7 +133,6 @@ afterAll(async () => {
     prisma.healthCheck.deleteMany({ where }),
     prisma.drive.deleteMany({ where }),
     prisma.storageMode.deleteMany({ where }),
-    prisma.authToken.deleteMany({ where }),
     prisma.user.deleteMany({ where: { id: { in: userIds } } }),
   ]);
   await prisma.$disconnect();
@@ -225,11 +224,6 @@ describe('upload and download', () => {
     expect(res.status).toBe(400);
     expect((await api.post(`/upload/${init.fileId}/complete`, {})).status).toBe(409);
     expect((await api.del(`/upload/${init.fileId}`)).status).toBe(200);
-  });
-
-  it('refuses files larger than the pool', async () => {
-    const res = await api.post('/upload/init', { name: 'huge.bin', sizeBytes: 1_000_000 });
-    expect(res.status).toBe(507);
   });
 
   it('high reliability keeps two copies and survives losing one', async () => {
@@ -482,6 +476,51 @@ describe('resumable and fault-tolerant upload', () => {
     const res = await api.post('/upload/init', { name: 'enormous.bin', sizeBytes: 3_000_000 });
     expect(res.status).toBe(413);
     expect(((await res.json()) as any).error.code).toBe('FILE_TOO_LARGE');
+  });
+});
+
+describe('name conflicts', () => {
+  it('keeps a second file of the same name instead of hiding it', async () => {
+    const folder = (await (await api.post('/files', { name: 'Reports' })).json()) as any;
+    const first = await upload(api, new Uint8Array(randomBytes(100)), 'report.pdf', folder.id);
+    const second = await upload(api, new Uint8Array(randomBytes(120)), 'report.pdf', folder.id);
+
+    const names = await prisma.file.findMany({
+      where: { id: { in: [first.fileId, second.fileId] } },
+      select: { name: true, virtual_path: true },
+      orderBy: { created_at: 'asc' },
+    });
+    expect(names.map((n) => n.name)).toEqual(['report.pdf', 'report (2).pdf']);
+    expect(names[1].virtual_path).toBe('/Reports/report (2).pdf');
+  });
+
+  it('numbers a repeated folder name too', async () => {
+    await api.post('/files', { name: 'Shared' });
+    const again = (await (await api.post('/files', { name: 'Shared' })).json()) as any;
+    expect(again.name).toBe('Shared (2)');
+  });
+
+  it('refuses a rename onto a name that is taken', async () => {
+    const folder = (await (await api.post('/files', { name: 'Clash' })).json()) as any;
+    await upload(api, new Uint8Array(randomBytes(50)), 'a.bin', folder.id);
+    const b = await upload(api, new Uint8Array(randomBytes(50)), 'b.bin', folder.id);
+
+    const res = await api.patch(`/files/${b.fileId}`, { name: 'a.bin' });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as any).error.code).toBe('NAME_TAKEN');
+  });
+});
+
+describe('insufficient storage', () => {
+  it('says how much space the upload needed and what each drive has', async () => {
+    const res = await api.post('/upload/init', { name: 'too-big.bin', sizeBytes: 1_000_000 });
+    expect(res.status).toBe(507);
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe('INSUFFICIENT_STORAGE');
+    expect(body.error.details.requiredBytes).toBe(1_000_000);
+    expect(body.error.details.availableBytes).toBeLessThan(1_000_000);
+    expect(body.error.details.drives).toHaveLength(3);
+    expect(body.error.details.drives[0]).toHaveProperty('availableBytes');
   });
 });
 

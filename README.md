@@ -27,6 +27,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
   - *Maximum capacity*: each chunk goes to the drive with the most free space.
   - *High reliability*: each chunk is stored on at least two drives. Downloads fall back to another copy when one is missing or corrupt.
 - **Folders** are virtual — they exist only in EkDrive's database, so moving and renaming never touches Google Drive. A folder can be uploaded whole and downloaded back as a zip that is built while it streams.
+- **Names stay distinct.** A second `report.pdf` in the same folder is stored as `report (2).pdf`; renaming onto a taken name is refused.
 - **Trash.** Deleting moves an item to the trash for 30 days. Trashed files keep using Google space until they are purged.
 - **Self-repair.** When a chunk is deleted outside EkDrive, sync marks that copy missing, rebuilds it from another copy and notifies you. A file with no copy left is reported as damaged. `POST /api/v1/files/:id/repair` runs a repair on demand.
 - **Background jobs**: drive health every 15 minutes, change sync every 10 minutes, and a daily cleanup of abandoned uploads, expired trash, expired share links and old records. They run on timers inside the backend process; with `REDIS_URL` set they run as BullMQ repeatable jobs instead, which survives a restart mid-job and spreads the work across instances.

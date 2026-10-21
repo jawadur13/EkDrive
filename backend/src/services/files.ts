@@ -26,6 +26,26 @@ export function buildVirtualPath(parent: { virtual_path: string } | null, name: 
   return parent ? `${parent.virtual_path.replace(/\/$/, '')}/${name}` : `/${name}`;
 }
 
+// Two files with the same name in one folder would be indistinguishable in the list and in a
+// downloaded zip, so a second one is stored as "report (2).pdf", the way a desktop does it.
+export async function uniqueNameInFolder(userId: string, parentId: string | null, name: string, ignoreFileId?: string) {
+  const siblings = await prisma.file.findMany({
+    where: { user_id: userId, parent_id: parentId, trashed_at: null, ...(ignoreFileId ? { id: { not: ignoreFileId } } : {}) },
+    select: { name: true },
+  });
+  const taken = new Set(siblings.map((s) => s.name.toLowerCase()));
+  if (!taken.has(name.toLowerCase())) return name;
+
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const extension = dot > 0 ? name.slice(dot) : '';
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${stem} (${n})${extension}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  throw new HttpError(409, 'NAME_TAKEN', 'Too many files with this name in one folder');
+}
+
 export async function listFiles(userId: string, parentFolderId: string | null, cursor: string | null, limit = 50) {
   const take = Math.min(Math.max(limit, 1), 200);
   const where = { user_id: userId, parent_id: parentFolderId, status: FILE_STATUS.ready, trashed_at: null };
@@ -67,8 +87,8 @@ export async function getBreadcrumbs(userId: string, folderId: string) {
 
 // Folders exist only in EkDrive's virtual filesystem; nothing is created on Google Drive.
 export async function createFolder(userId: string, rawName: string, parentFolderId: string | null) {
-  const name = validateName(rawName);
   const parent = await resolveParentFolder(userId, parentFolderId);
+  const name = await uniqueNameInFolder(userId, parent?.id ?? null, validateName(rawName));
   return prisma.file.create({
     data: {
       user_id: userId,
@@ -103,6 +123,11 @@ export async function updateFile(userId: string, fileId: string, data: { name?: 
   const name = data.name !== undefined ? validateName(data.name) : file.name;
   const parentId = data.parentFolderId !== undefined ? data.parentFolderId : file.parent_id;
   const parent = await resolveParentFolder(userId, parentId);
+
+  const free = await uniqueNameInFolder(userId, parent?.id ?? null, name, file.id);
+  if (free !== name) {
+    throw new HttpError(409, 'NAME_TAKEN', `“${name}” already exists in that folder`);
+  }
 
   if (parent && file.is_folder) {
     const subtree = await collectSubtree(userId, file.id);
