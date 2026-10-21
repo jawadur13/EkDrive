@@ -68,6 +68,7 @@ Every variable lives in `.env.local` at the repo root; `.env.example` documents 
 | `pnpm build` | Type-checks, bundles the backend to `backend/dist`, builds the frontend to `frontend/dist` |
 | `pnpm test` | Unit tests in both packages |
 | `pnpm --filter ekdrive-backend test:integration` | API tests against the real `DATABASE_URL` |
+| `pnpm test:coverage` | Unit + integration with coverage thresholds (needs `DATABASE_URL`) |
 | `pnpm lint` / `pnpm typecheck` | ESLint / `tsc --noEmit` in both packages |
 | `pnpm db:migrate` | `prisma migrate deploy` using `.env.local` |
 | `pnpm --filter ekdrive-backend start` | Runs the built backend |
@@ -75,7 +76,10 @@ Every variable lives in `.env.local` at the repo root; `.env.example` documents 
 ## Testing
 
 - **Unit tests** cover chunk placement for each storage mode, encryption round-trips, checksums, path handling and header building. They need no database.
+- **Coverage** is measured over the unit and integration suites together, since the routes are covered through the HTTP app. Backend thresholds are 70% lines / 70% functions / 75% branches; the frontend's are set at what its suite covers today and should rise as pages gain tests.
 - **Integration tests** drive the real HTTP app against the database in `DATABASE_URL`, with only Google Drive replaced by an in-memory store. They cover the upload → download path, replicas and fallback, trash, range requests, repair, rebalance, share links, ownership isolation, activity, notifications and analytics. They create their own users and delete everything afterwards, but they do write to that database — point `DATABASE_URL` at a development one.
+
+CI runs typecheck, lint, the full test suite with coverage against a PostgreSQL service container, and a production build on every push and pull request.
 
 ## API
 

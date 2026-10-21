@@ -14,7 +14,8 @@
     "db:migrate": "dotenv -e ../.env.local -- prisma migrate deploy",
     "db:migrate:dev": "dotenv -e ../.env.local -- prisma migrate dev",
     "db:studio": "dotenv -e ../.env.local -- prisma studio",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:coverage": "vitest run --coverage --config vitest.coverage.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.0",
@@ -33,6 +34,7 @@
     "@eslint/js": "^9.37.0",
     "@types/jsonwebtoken": "^9.0.0",
     "@types/node": "^22.16.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "dotenv-cli": "^11.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^9.37.0",

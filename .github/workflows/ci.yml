@@ -8,6 +8,30 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # The integration suite talks to a real database; everything else is mocked.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ekdrive
+          POSTGRES_PASSWORD: ekdrive
+          POSTGRES_DB: ekdrive_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ekdrive"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://ekdrive:ekdrive@localhost:5432/ekdrive_test
+      JWT_SECRET: ci-jwt-secret
+      ENCRYPTION_KEY: ci-encryption-key
+      ENCRYPTION_SALT: ci-encryption-salt
+      GOOGLE_CLIENT_ID: ci-client-id
+      GOOGLE_CLIENT_SECRET: ci-client-secret
+
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -15,9 +39,18 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter ekdrive-backend db:generate
+      - name: Apply migrations
+        run: pnpm --filter ekdrive-backend exec prisma migrate deploy
+
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      - name: Tests with coverage
+        run: pnpm test:coverage
       - run: pnpm build
+
+      - name: Audit dependencies
+        run: pnpm audit --prod --audit-level high
+        continue-on-error: true

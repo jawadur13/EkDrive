@@ -27,12 +27,12 @@ export async function authenticateUser(c: any, next: any) {
   }
 
   let userId: string;
-  let issuedAt: number;
+  let issuedAtMs: number;
   try {
-    const decoded = jwt.verify(token, env.jwtSecret) as { sub?: string; type?: string; iat?: number };
+    const decoded = jwt.verify(token, env.jwtSecret) as { sub?: string; type?: string; iat?: number; iatMs?: number };
     if (decoded.type !== 'session' || !decoded.sub || !decoded.iat) throw new Error('Not a session token');
     userId = decoded.sub;
-    issuedAt = decoded.iat;
+    issuedAtMs = decoded.iatMs ?? decoded.iat * 1000;
   } catch {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
   }
@@ -43,8 +43,7 @@ export async function authenticateUser(c: any, next: any) {
   }
 
   // "Sign out everywhere" moves this forward, which retires every token issued before it.
-  // iat has second precision, so compare on whole seconds.
-  if (issuedAt < Math.floor(user.sessions_valid_from.getTime() / 1000)) {
+  if (issuedAtMs < user.sessions_valid_from.getTime()) {
     return c.json({ error: { code: 'SESSION_REVOKED', message: 'This session was signed out' } }, 401);
   }
 

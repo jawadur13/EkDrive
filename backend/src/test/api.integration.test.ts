@@ -61,7 +61,7 @@ async function createUser(label: string, driveCount: number, quota = 10_000) {
       },
     });
   }
-  const token = jwt.sign({ sub: user.id, type: 'session' }, env.jwtSecret, { expiresIn: 600 });
+  const token = jwt.sign({ sub: user.id, type: 'session', iatMs: Date.now() }, env.jwtSecret, { expiresIn: 600 });
   return { user, token };
 }
 

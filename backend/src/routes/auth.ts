@@ -117,7 +117,11 @@ authRoutes.get('/callback', async (c) => {
     // The account used to sign in is also the user's first drive.
     await upsertConnectedDrive(user.id, tokens, payload.email);
 
-    const session = jwt.sign({ sub: user.id, type: 'session' }, env.jwtSecret, { expiresIn: SESSION_TTL_SECONDS });
+    // iatMs, because the standard iat is only accurate to the second and "sign out
+    // everywhere" has to retire a token issued moments earlier in that same second.
+    const session = jwt.sign({ sub: user.id, type: 'session', iatMs: Date.now() }, env.jwtSecret, {
+      expiresIn: SESSION_TTL_SECONDS,
+    });
     // Strict: the SPA only ever calls the API from its own origin, so the cookie never needs
     // to ride along with a cross-site request. The OAuth state cookie stays Lax because it
     // has to survive the return trip from Google.

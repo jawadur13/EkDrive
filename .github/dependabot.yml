@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories: ['/', '/backend', '/frontend']
+    schedule:
+      interval: weekly
+    groups:
+      # One PR per ecosystem keeps the noise down; security fixes still come through.
+      all-dependencies:
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
