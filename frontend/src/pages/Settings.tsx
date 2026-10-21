@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import api, { getErrorMessage } from '../services/api';
 import { useDrives, useStorageMode, type Drive, type StorageModeName } from '../hooks/useDriveHealth';
+import { useAuthStore } from '../stores/authStore';
 import { formatBytes, timeAgo } from '../utils/format';
 
 const MODES: Array<{ id: StorageModeName; label: string; description: string }> = [
@@ -79,6 +80,7 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const drives = useDrives();
+  const logout = useAuthStore((s) => s.logout);
   const storageMode = useStorageMode();
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(() => {
@@ -200,6 +202,25 @@ export default function Settings() {
               {rebalance.data?.running ? 'Rebalancing…' : 'Rebalance now'}
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h2 className="text-base font-semibold text-gray-900">Security</h2>
+        </div>
+        <div className="card-body flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-gray-500">
+            Signing out everywhere ends this session and every other one, on every device. Your drives stay connected.
+          </p>
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              if (window.confirm('Sign out on this and every other device?')) logout(true);
+            }}
+          >
+            Sign out everywhere
+          </button>
         </div>
       </div>
     </div>

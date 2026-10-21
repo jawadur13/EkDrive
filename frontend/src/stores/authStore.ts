@@ -13,7 +13,7 @@ interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  logout: () => Promise<void>;
+  logout: (everywhere?: boolean) => Promise<void>;
   checkAuth: () => Promise<void>;
 }
 
@@ -21,9 +21,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
   isLoading: true,
-  logout: async () => {
-    // The cookie is HttpOnly, so only the server can clear it.
-    await api.post('/auth/logout').catch(() => {});
+  logout: async (everywhere = false) => {
+    // The cookie is HttpOnly, so only the server can clear it. With everywhere, the server
+    // also retires sessions on other devices.
+    await api.post('/auth/logout', { everywhere }).catch(() => {});
     set({ user: null, isAuthenticated: false });
     window.location.href = '/login';
   },

@@ -9,9 +9,12 @@ export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const PUBLIC_PATHS = ['/api/v1/auth/login', '/api/v1/auth/callback'];
 const PUBLIC_PREFIXES = ['/api/v1/shares/public/'];
 
+export function isPublicPath(path: string) {
+  return PUBLIC_PATHS.includes(path) || PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
 export async function authenticateUser(c: any, next: any) {
-  const path: string = c.req.path;
-  if (PUBLIC_PATHS.includes(path) || PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+  if (isPublicPath(c.req.path)) {
     await next();
     return;
   }
@@ -24,10 +27,12 @@ export async function authenticateUser(c: any, next: any) {
   }
 
   let userId: string;
+  let issuedAt: number;
   try {
-    const decoded = jwt.verify(token, env.jwtSecret) as { sub?: string; type?: string };
-    if (decoded.type !== 'session' || !decoded.sub) throw new Error('Not a session token');
+    const decoded = jwt.verify(token, env.jwtSecret) as { sub?: string; type?: string; iat?: number };
+    if (decoded.type !== 'session' || !decoded.sub || !decoded.iat) throw new Error('Not a session token');
     userId = decoded.sub;
+    issuedAt = decoded.iat;
   } catch {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
   }
@@ -35,6 +40,12 @@ export async function authenticateUser(c: any, next: any) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'User not found' } }, 401);
+  }
+
+  // "Sign out everywhere" moves this forward, which retires every token issued before it.
+  // iat has second precision, so compare on whole seconds.
+  if (issuedAt < Math.floor(user.sessions_valid_from.getTime() / 1000)) {
+    return c.json({ error: { code: 'SESSION_REVOKED', message: 'This session was signed out' } }, 401);
   }
 
   c.set('userId', user.id);

@@ -384,6 +384,38 @@ describe('repair and rebalance', () => {
   });
 });
 
+describe('security', () => {
+  it('sets the security headers on every response', async () => {
+    const res = await api.get('/auth/me');
+    expect(res.headers.get('content-security-policy')).toContain("default-src 'none'");
+    expect(res.headers.get('permissions-policy')).toContain('camera=()');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('retires existing sessions when the user signs out everywhere', async () => {
+    const victim = await createUser('revoked', 1);
+    expect((await client(victim.token).get('/auth/me')).status).toBe(200);
+
+    expect((await client(victim.token).post('/auth/logout', { everywhere: true })).status).toBe(200);
+
+    const res = await client(victim.token).get('/auth/me');
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as any).error.code).toBe('SESSION_REVOKED');
+  });
+
+  it('refuses a cookie-authenticated write from another origin', async () => {
+    const headers = { Cookie: `access_token=${owner.token}`, 'Content-Type': 'application/json' };
+    const body = JSON.stringify({ name: 'csrf-test' });
+
+    const evil = await app.request('/api/v1/files', { method: 'POST', body, headers: { ...headers, Origin: 'https://evil.example' } });
+    expect(evil.status).toBe(403);
+    expect(((await evil.json()) as any).error.code).toBe('BAD_ORIGIN');
+
+    const ours = await app.request('/api/v1/files', { method: 'POST', body, headers: { ...headers, Origin: env.frontendUrl } });
+    expect(ours.status).toBe(201);
+  });
+});
+
 describe('resumable and fault-tolerant upload', () => {
   it('reports which chunks are still missing and refuses to complete early', async () => {
     const data = new Uint8Array(randomBytes(2500));

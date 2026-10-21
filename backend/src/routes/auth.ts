@@ -8,9 +8,13 @@ import { createOAuthClient, GOOGLE_SCOPES, getOAuthRedirectUri } from '../utils/
 import { DriveOwnershipError, upsertConnectedDrive } from '../services/drives';
 import { getStorageMode } from '../services/storage-mode';
 import { logActivity } from '../services/activity';
+import { parseBody } from '../middleware/validation';
+import { z } from 'zod';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS } from '../middleware/auth';
 
 export const authRoutes = new Hono();
+
+const logoutSchema = z.object({ everywhere: z.boolean().optional() }).nullish();
 
 const STATE_COOKIE = 'oauth_state';
 const STATE_TTL_SECONDS = 10 * 60;
@@ -114,10 +118,13 @@ authRoutes.get('/callback', async (c) => {
     await upsertConnectedDrive(user.id, tokens, payload.email);
 
     const session = jwt.sign({ sub: user.id, type: 'session' }, env.jwtSecret, { expiresIn: SESSION_TTL_SECONDS });
+    // Strict: the SPA only ever calls the API from its own origin, so the cookie never needs
+    // to ride along with a cross-site request. The OAuth state cookie stays Lax because it
+    // has to survive the return trip from Google.
     setCookie(c, SESSION_COOKIE, session, {
       path: '/',
       httpOnly: true,
-      sameSite: 'Lax',
+      sameSite: 'Strict',
       secure: env.secureCookies,
       maxAge: SESSION_TTL_SECONDS,
     });
@@ -148,7 +155,16 @@ authRoutes.get('/me', async (c) => {
   });
 });
 
-authRoutes.post('/logout', (c) => {
+// Body { "everywhere": true } also retires every other session of this user: there is no
+// session table, so the user carries a timestamp that every token is checked against.
+authRoutes.post('/logout', async (c) => {
+  const userId = (c as any).get('userId') as string | undefined;
+  const body = await parseBody(c, logoutSchema);
+
+  if (body?.everywhere && userId) {
+    await prisma.user.update({ where: { id: userId }, data: { sessions_valid_from: new Date() } });
+  }
+
   deleteCookie(c, SESSION_COOKIE, { path: '/', secure: env.secureCookies });
-  return c.json({ message: 'Logged out' });
+  return c.json({ message: body?.everywhere ? 'Signed out on every device' : 'Logged out' });
 });

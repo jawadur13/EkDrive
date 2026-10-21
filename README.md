@@ -58,7 +58,7 @@ Every variable lives in `.env.local` at the repo root; `.env.example` documents 
 | `BACKEND_URL`, `CORS_ORIGIN`, `PORT` | no | Defaults are localhost 3000 / 5173 |
 | `CHUNK_SIZE_BYTES` | no | 50 MB by default |
 | `MAX_FILE_SIZE_BYTES` | no | 10 GiB by default |
-| `RATE_LIMIT_MAX`, `TRUST_PROXY` | no | `TRUST_PROXY=true` only behind a proxy you control |
+| `RATE_LIMIT_MAX`, `TRUST_PROXY` | no | Requests per minute per user (100). `TRUST_PROXY=true` only behind a proxy you control |
 
 ## Scripts
 
@@ -83,7 +83,7 @@ All routes are under `/api/v1` and need the session cookie, except `/auth/login`
 
 | Group | Routes |
 |---|---|
-| `auth` | `login`, `callback`, `connect`, `me`, `logout` |
+| `auth` | `login`, `callback`, `connect`, `me`, `logout` (optionally everywhere) |
 | `files` | list, search, issues, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/preview`, `:id/repair` |
 | `upload` | `init`, `:id/status`, `:id/chunk/:index`, `:id/complete`, abort |
 | `trash` | list, restore, delete one, empty |
@@ -110,9 +110,17 @@ audit/              readiness audits
 
 ## Deployment notes
 
-- Serve the frontend and `/api` from the same site (for example, a reverse proxy that sends `/api` to the backend). The session is an HttpOnly, `SameSite=Lax` cookie.
+- Serve the frontend and `/api` from the same site (for example, a reverse proxy that sends `/api` to the backend). The session is an HttpOnly, `SameSite=Strict` cookie, and writes are additionally checked against the `Origin` header.
 - Set `BACKEND_URL` to the public `https://` URL: that makes cookies `Secure` and sets the OAuth redirect URI.
 - Run a single backend instance, or move the rate limiter to Redis first.
+
+## Security notes
+
+- Each drive's OAuth tokens are encrypted with AES-256-GCM before they are stored, and only the `drive.file` scope is requested.
+- The session is a 7-day HttpOnly `SameSite=Strict` cookie. Settings → Sign out everywhere moves a per-user timestamp forward, which retires every token already issued.
+- Writes that arrive with a cookie must carry an `Origin` header matching this deployment.
+- Every signed-in request is rate limited per user, with tighter budgets for rebalance and sync; unauthenticated requests are limited per IP.
+- Responses carry a locked-down `Content-Security-Policy` and `Permissions-Policy`; inline previews are served with their own sandboxed policy.
 
 ## Known limitations
 

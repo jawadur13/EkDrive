@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "sessions_valid_from" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+

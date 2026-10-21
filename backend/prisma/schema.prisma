@@ -13,6 +13,8 @@ model User {
   display_name  String?  @db.VarChar(255)
   avatar_url    String?  @db.Text
   storage_mode  String   @default("balanced") @db.VarChar(20)
+  // Sessions issued before this are rejected, which is how "sign out everywhere" works.
+  sessions_valid_from DateTime @default(now()) @db.Timestamp(6)
   max_storage_gb Int?
   created_at    DateTime @default(now()) @db.Timestamp(6)
   updated_at    DateTime @default(now()) @db.Timestamp(6)

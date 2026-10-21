@@ -7,6 +7,7 @@ import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { HTTPException } from 'hono/http-exception';
 import { authenticateUser } from './middleware/auth';
+import { requireSameOrigin } from './middleware/csrf';
 import { rateLimit } from './middleware/rate-limit';
 import { authRoutes } from './routes/auth';
 import { fileRoutes } from './routes/files';
@@ -24,13 +25,27 @@ import './utils/bigint-json';
 
 export const app = new Hono();
 
-app.use('*', secureHeaders());
-app.use('*', cors({ origin: env.frontendUrl, credentials: true }));
+app.use(
+  '*',
+  secureHeaders({
+    // The API serves JSON and file bytes, never HTML of its own, so nothing may be loaded or
+    // framed. Inline previews relax this per response in services/file-stream.ts.
+    contentSecurityPolicy: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'none'"],
+      formAction: ["'none'"],
+    },
+    permissionsPolicy: { camera: [], microphone: [], geolocation: [], payment: [], usb: [] },
+    crossOriginResourcePolicy: 'same-site',
+  })
+);
+app.use('*', cors({ origin: env.frontendUrl, credentials: true, maxAge: 3600 }));
 if (process.env.NODE_ENV !== 'test') app.use('*', logger());
 
-app.use('/api/v1/auth/*', rateLimit());
-app.use('/api/v1/shares/public/*', rateLimit());
-app.use('/api/v1/upload/*', rateLimit(env.rateLimitMax * 5));
+// Before auth, so an unauthenticated flood is counted per IP.
+app.use('/api/v1/auth/*', rateLimit({ bucket: 'auth' }));
+app.use('/api/v1/shares/public/*', rateLimit({ bucket: 'public-share' }));
 
 // JSON bodies are small; chunk uploads set their own limit in routes/upload.ts.
 app.use('/api/v1/*', async (c, next) => {
@@ -39,6 +54,15 @@ app.use('/api/v1/*', async (c, next) => {
 });
 
 app.use('/api/v1/*', authenticateUser);
+app.use('/api/v1/*', requireSameOrigin);
+
+// After auth, so the budgets below are per user. Chunk uploads and file reads are allowed to
+// be chatty; the jobs that move data between Google accounts are not.
+app.use('/api/v1/*', rateLimit({ bucket: 'api', max: env.rateLimitMax }));
+app.use('/api/v1/upload/*', rateLimit({ bucket: 'upload', max: env.rateLimitMax * 10 }));
+app.use('/api/v1/files/*', rateLimit({ bucket: 'files', max: env.rateLimitMax * 5 }));
+app.use('/api/v1/storage-mode/rebalance', rateLimit({ bucket: 'rebalance', max: 5 }));
+app.use('/api/v1/sync/trigger', rateLimit({ bucket: 'sync', max: 10 }));
 
 app.route('/api/v1/auth', authRoutes);
 app.route('/api/v1/files', fileRoutes);
