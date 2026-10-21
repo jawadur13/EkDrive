@@ -105,6 +105,7 @@ All routes are under `/api/v1` and need the session cookie, except `/auth/login`
 ## Project layout
 
 ```
+docker-compose.yml  PostgreSQL, Redis, the API and nginx
 backend/
   prisma/           schema and migrations
   src/routes/       HTTP layer (Hono)
@@ -115,6 +116,21 @@ frontend/src/       React + Vite SPA (pages, components, services, stores)
 plan/               original design documents
 audit/              readiness audits
 ```
+
+## Running it with Docker
+
+```bash
+cp .env.example .env.local        # fill in the Google credentials and the three secrets
+docker compose up -d --build      # http://localhost:8080
+```
+
+Compose brings up PostgreSQL, Redis, the API and an nginx that serves the built frontend and
+passes `/api` to the API, so everything is on one origin. Migrations run when the API
+container starts. Set `BACKEND_URL` and `CORS_ORIGIN` to the address people actually use, and
+register `<BACKEND_URL>/api/v1/auth/callback` in Google Cloud Console.
+
+> These container files have not been built on this machine — Docker is not installed here —
+> so treat the first `docker compose up` as the thing that proves them.
 
 ## Deployment notes
 
