@@ -247,6 +247,7 @@ export async function removeFiles(ids: string[]) {
   }
 
   await prisma.$transaction([
+    prisma.thumbnail.deleteMany({ where: { file_id: { in: ids } } }),
     prisma.shareLink.deleteMany({ where: { file_id: { in: ids } } }),
     prisma.syncEntry.deleteMany({ where: { file_id: { in: ids } } }),
     prisma.chunk.deleteMany({ where: { file_id: { in: ids } } }),

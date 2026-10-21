@@ -123,6 +123,7 @@ afterAll(async () => {
   const files = await prisma.file.findMany({ where, select: { id: true } });
   const fileIds = files.map((f) => f.id);
   await prisma.$transaction([
+    prisma.thumbnail.deleteMany({ where: { file_id: { in: fileIds } } }),
     prisma.activity.deleteMany({ where }),
     prisma.notification.deleteMany({ where }),
     prisma.shareLink.deleteMany({ where }),
@@ -521,6 +522,43 @@ describe('insufficient storage', () => {
     expect(body.error.details.availableBytes).toBeLessThan(1_000_000);
     expect(body.error.details.drives).toHaveLength(3);
     expect(body.error.details.drives[0]).toHaveProperty('availableBytes');
+  });
+});
+
+describe('thumbnails', () => {
+  it('makes one for an image on first request and reuses it after', async () => {
+    const sharp = (await import('sharp')).default;
+    const png = await sharp({ create: { width: 600, height: 400, channels: 3, background: { r: 10, g: 120, b: 200 } } })
+      .png()
+      .toBuffer();
+
+    const init = (await (await api.post('/upload/init', { name: 'photo.png', sizeBytes: png.byteLength, mimeType: 'image/png' })).json()) as any;
+    for (let index = 0; index < init.chunkCount; index++) {
+      const chunk = new Uint8Array(png.subarray(index * init.chunkSize, (index + 1) * init.chunkSize));
+      await api.post(`/upload/${init.fileId}/chunk/${index}`, chunk, { 'x-chunk-checksum': await computeChecksum(chunk) });
+    }
+    await api.post(`/upload/${init.fileId}/complete`, {});
+
+    const res = await api.get(`/files/${init.fileId}/thumbnail`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/webp');
+
+    const body = Buffer.from(await res.arrayBuffer());
+    expect(body.byteLength).toBeGreaterThan(0);
+    expect(body.byteLength).toBeLessThan(png.byteLength);
+
+    const stored = await prisma.thumbnail.findUnique({ where: { file_id: init.fileId } });
+    expect(stored).toMatchObject({ width: 256, height: 256 });
+
+    // The second request is served from the stored copy, not generated again.
+    const again = await api.get(`/files/${init.fileId}/thumbnail`);
+    expect(Buffer.from(await again.arrayBuffer()).equals(body)).toBe(true);
+    expect(stored!.created_at).toEqual((await prisma.thumbnail.findUnique({ where: { file_id: init.fileId } }))!.created_at);
+  });
+
+  it('has nothing to show for a file that is not an image', async () => {
+    const { fileId } = await upload(api, new Uint8Array(randomBytes(200)), 'notes.bin');
+    expect((await api.get(`/files/${fileId}/thumbnail`)).status).toBe(404);
   });
 });
 

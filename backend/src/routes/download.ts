@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { prisma } from '../db/client';
 import { FILE_STATUS } from '../services/files';
 import { contentDisposition, fileResponse, streamFolderArchive } from '../services/file-stream';
+import { getOrCreateThumbnail, isThumbnailable } from '../services/thumbnails';
 import { HttpError, notFound } from '../utils/errors';
 
 export const downloadRoutes = new Hono();
@@ -22,6 +23,23 @@ downloadRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/archive', async (c) => {
     'Content-Disposition': contentDisposition(`${folder.name}.zip`, 'attachment'),
     'X-Content-Type-Options': 'nosniff',
     'Cache-Control': 'private, no-store',
+  });
+});
+
+// A small square for the file list. 404 when the file is not an image, so the UI can fall
+// back to an icon without a second round trip.
+downloadRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/thumbnail', async (c) => {
+  const file = await getReadyFile((c as any).get('userId'), c.req.param('fileId'));
+  if (!isThumbnailable(file)) throw notFound('Thumbnail');
+
+  const thumbnail = await getOrCreateThumbnail(file);
+  if (!thumbnail) throw notFound('Thumbnail');
+
+  return c.body(new Uint8Array(thumbnail.bytes), 200, {
+    'Content-Type': 'image/webp',
+    'Content-Length': String(thumbnail.bytes.byteLength),
+    'Cache-Control': 'private, max-age=86400',
+    'X-Content-Type-Options': 'nosniff',
   });
 });
 

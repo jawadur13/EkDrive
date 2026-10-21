@@ -84,6 +84,7 @@ model File {
   chunks Chunk[]
   shareLinks ShareLink[]
   syncEntries SyncEntry[]
+  thumbnail Thumbnail?
 
   @@index([user_id])
   @@index([parent_id])
@@ -207,4 +208,16 @@ model Notification {
 
   @@index([user_id, read_at])
   @@index([user_id, created_at])
+}
+
+// Generated the first time a thumbnail is asked for. Small enough to keep in the database,
+// which means no second store to run and no extra round trip to Google to show a grid.
+model Thumbnail {
+  file_id    String   @id @db.Uuid
+  bytes      Bytes
+  width      Int
+  height     Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  file File @relation(fields: [file_id], references: [id])
 }

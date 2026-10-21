@@ -29,6 +29,31 @@ interface UploadTask {
   controller: AbortController;
 }
 
+const THUMBNAILABLE = /^image\/(png|jpe?g|gif|webp|avif|bmp|tiff)$/;
+
+// Shows the picture itself where there is one; the icon stays as the fallback, including
+// when the thumbnail cannot be made (too large, or the bytes are not really an image).
+function FileIcon({ file }: { file: FileItem }) {
+  const [failed, setFailed] = useState(false);
+  const showImage = !failed && THUMBNAILABLE.test(file.mime_type ?? '');
+
+  return (
+    <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-50 text-xl">
+      {showImage ? (
+        <img
+          src={`/api/v1/files/${file.id}/thumbnail`}
+          alt=""
+          loading="lazy"
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        getFileIcon(file.mime_type, file.is_folder)
+      )}
+    </span>
+  );
+}
+
 function getFileIcon(mimeType: string | null, isFolder: boolean) {
   if (isFolder) return '📁';
   if (!mimeType) return '📄';
@@ -314,9 +339,7 @@ export default function FileList() {
                 <tr key={file.id} className="hover:bg-blue-50/40 transition-colors duration-200 group">
                   <td className="min-w-0 px-4 py-3 sm:px-6">
                     <button onClick={() => open(file)} className="flex w-full items-center gap-3 text-left">
-                      <span className="text-xl flex-shrink-0 w-9 h-9 flex items-center justify-center bg-slate-50 rounded-xl">
-                        {getFileIcon(file.mime_type, file.is_folder)}
-                      </span>
+                      <FileIcon file={file} />
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-semibold text-slate-700 group-hover:text-blue-600">
                           {file.name}
