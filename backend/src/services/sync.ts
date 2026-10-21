@@ -151,12 +151,17 @@ export async function triggerSync(userId: string) {
   return { triggered: drives.length, results };
 }
 
-export async function getConflicts(userId: string) {
-  return prisma.syncEntry.findMany({
+export async function getConflicts(userId: string, limit = 100) {
+  const take = Math.min(Math.max(limit, 1), 200);
+  const conflicts = await prisma.syncEntry.findMany({
     where: { user_id: userId, sync_status: 'conflict' },
     include: { file: { select: { id: true, name: true, virtual_path: true } } },
     orderBy: { created_at: 'desc' },
+    take: take + 1,
   });
+  const hasMore = conflicts.length > take;
+  if (hasMore) conflicts.pop();
+  return { conflicts, hasMore };
 }
 
 // 'local' keeps EkDrive's copy: the file is repaired from its remaining copies.

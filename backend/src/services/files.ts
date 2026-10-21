@@ -177,11 +177,16 @@ export async function trashFile(userId: string, fileId: string) {
   return file;
 }
 
-export async function listTrash(userId: string) {
-  return prisma.file.findMany({
+export async function listTrash(userId: string, limit = 100) {
+  const take = Math.min(Math.max(limit, 1), 200);
+  const items = await prisma.file.findMany({
     where: { user_id: userId, trash_root: true, trashed_at: { not: null } },
     orderBy: { trashed_at: 'desc' },
+    take: take + 1,
   });
+  const hasMore = items.length > take;
+  if (hasMore) items.pop();
+  return { items, hasMore };
 }
 
 async function getTrashRoot(userId: string, fileId: string) {

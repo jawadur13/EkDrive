@@ -90,7 +90,7 @@ export default function Health() {
   });
   const conflicts = useQuery({
     queryKey: ['sync-conflicts'],
-    queryFn: () => api.get('/sync/conflicts').then((r) => r.data.conflicts as Conflict[]),
+    queryFn: () => api.get('/sync/conflicts').then((r) => r.data as { conflicts: Conflict[]; hasMore: boolean }),
   });
   const issues = useQuery({
     queryKey: ['file-issues'],
@@ -208,11 +208,11 @@ export default function Health() {
               <h2 className="text-base font-semibold text-slate-900">Changes made outside EkDrive</h2>
             </div>
             <div className="card-body">
-              {(conflicts.data ?? []).length === 0 ? (
+              {(conflicts.data?.conflicts ?? []).length === 0 ? (
                 <p className="text-sm text-slate-400">Nothing to review.</p>
               ) : (
                 <ul className="divide-y divide-slate-50">
-                  {conflicts.data!.map((conflict) => (
+                  {conflicts.data!.conflicts.map((conflict) => (
                     <li key={conflict.id} className="flex flex-wrap items-center gap-3 py-3">
                       <div className="min-w-[14rem] flex-1">
                         <p className="text-sm text-slate-800">
@@ -243,6 +243,11 @@ export default function Health() {
                     </li>
                   ))}
                 </ul>
+              )}
+              {conflicts.data?.hasMore && (
+                <p className="pt-3 text-xs text-slate-500">
+                  Showing the newest {conflicts.data.conflicts.length}. Resolve these to see the rest.
+                </p>
               )}
             </div>
           </section>

@@ -23,7 +23,9 @@ eventRoutes.get('/', (c) => {
       };
 
       const unsubscribe = subscribe(userId, send);
+      // unref: a forgotten stream must never be the reason the process will not exit.
       const heartbeat = setInterval(() => send({ type: 'ping' }), HEARTBEAT_MS);
+      heartbeat.unref?.();
 
       function cleanup() {
         clearInterval(heartbeat);

@@ -6,7 +6,8 @@ export const trashRoutes = new Hono();
 
 trashRoutes.get('/', async (c) => {
   const userId = (c as any).get('userId') as string;
-  return c.json({ items: await listTrash(userId), retentionDays: TRASH_RETENTION_DAYS });
+  const { items, hasMore } = await listTrash(userId, parseInt(c.req.query('limit') || '100') || 100);
+  return c.json({ items, hasMore, retentionDays: TRASH_RETENTION_DAYS });
 });
 
 trashRoutes.post('/:fileId{[0-9a-fA-F-]{36}}/restore', async (c) => {

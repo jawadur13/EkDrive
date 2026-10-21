@@ -730,7 +730,7 @@ describe('health page data', () => {
       data: { user_id: owner.user.id, file_id: fileId, operation: 'delete', sync_status: 'conflict' },
     });
 
-    const listed = (await (await api.get('/sync/conflicts')).json() as any).conflicts;
+    const listed = ((await (await api.get('/sync/conflicts')).json()) as any).conflicts;
     expect(listed.map((c: any) => c.id)).toContain(entry.id);
 
     const res = await api.post(`/sync/conflicts/${entry.id}/resolve`, { resolution: 'local' });

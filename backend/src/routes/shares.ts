@@ -46,12 +46,16 @@ shareRoutes.post('/', async (c) => {
 
 shareRoutes.get('/', async (c) => {
   const userId = (c as any).get('userId') as string;
+  const take = Math.min(Math.max(parseInt(c.req.query('limit') || '100') || 100, 1), 200);
   const shares = await prisma.shareLink.findMany({
     where: { user_id: userId },
     include: { file: { select: shareFileSelect } },
     orderBy: { created_at: 'desc' },
+    take: take + 1,
   });
-  return c.json({ shares });
+  const hasMore = shares.length > take;
+  if (hasMore) shares.pop();
+  return c.json({ shares, hasMore });
 });
 
 shareRoutes.delete('/:shareId{[0-9a-fA-F-]{36}}', async (c) => {

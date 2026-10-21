@@ -17,7 +17,7 @@ export default function Trash() {
   const [error, setError] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ['trash'],
-    queryFn: () => api.get('/trash').then((r) => r.data as { items: TrashItem[]; retentionDays: number }),
+    queryFn: () => api.get('/trash').then((r) => r.data as { items: TrashItem[]; hasMore: boolean; retentionDays: number }),
   });
 
   const run = async (action: () => Promise<unknown>) => {
@@ -98,6 +98,12 @@ export default function Trash() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {data?.hasMore && (
+        <p className="text-sm text-slate-500">
+          Showing the {items.length} most recently deleted items. Restore or delete some to see the rest.
+        </p>
       )}
     </div>
   );

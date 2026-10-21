@@ -21,7 +21,7 @@ export function ShareLinks({ onError }: { onError: (message: string) => void }) 
   const [copied, setCopied] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ['shares'],
-    queryFn: () => api.get('/shares').then((r) => r.data.shares as ShareLink[]),
+    queryFn: () => api.get('/shares').then((r) => r.data as { shares: ShareLink[]; hasMore: boolean }),
   });
 
   const revoke = async (share: ShareLink) => {
@@ -60,11 +60,11 @@ export function ShareLinks({ onError }: { onError: (message: string) => void }) 
       <div className="card-body">
         {isLoading ? (
           <div className="skeleton h-10 w-full" />
-        ) : (data ?? []).length === 0 ? (
+        ) : (data?.shares ?? []).length === 0 ? (
           <p className="text-sm text-gray-400">You have not shared anything.</p>
         ) : (
           <ul className="divide-y divide-slate-50">
-            {data!.map((share) => (
+            {data!.shares.map((share) => (
               <li key={share.id} className="flex flex-wrap items-center gap-3 py-3">
                 <div className="min-w-[12rem] flex-1">
                   <p className="truncate text-sm font-medium text-slate-800">{share.file.name}</p>
@@ -84,6 +84,7 @@ export function ShareLinks({ onError }: { onError: (message: string) => void }) 
             ))}
           </ul>
         )}
+        {data?.hasMore && <p className="pt-3 text-xs text-slate-500">Showing the newest {data.shares.length} links.</p>}
       </div>
     </div>
   );

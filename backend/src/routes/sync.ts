@@ -20,7 +20,7 @@ syncRoutes.post('/trigger', async (c) => {
 
 syncRoutes.get('/conflicts', async (c) => {
   const userId = (c as any).get('userId') as string;
-  return c.json({ conflicts: await getConflicts(userId) });
+  return c.json(await getConflicts(userId, parseInt(c.req.query('limit') || '100') || 100));
 });
 
 syncRoutes.post('/conflicts/:conflictId{[0-9a-fA-F-]{36}}/resolve', async (c) => {

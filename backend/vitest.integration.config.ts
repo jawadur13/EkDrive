@@ -9,5 +9,8 @@ export default defineConfig({
     testTimeout: 60000,
     hookTimeout: 60000,
     fileParallelism: false,
+    // These talk to a hosted database; one retry absorbs a cold start or a dropped connection
+    // without hiding a real failure, which fails both attempts.
+    retry: 1,
   },
 });
