@@ -92,7 +92,7 @@ All routes are under `/api/v1` and need the session cookie, except `/auth/login`
 | Group | Routes |
 |---|---|
 | `auth` | `login`, `callback`, `connect`, `me`, `logout` (optionally everywhere) |
-| `files` | list, search, issues, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/archive`, `:id/preview`, `:id/thumbnail`, `:id/repair` |
+| `files` | list, recent, search, issues, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/archive`, `:id/preview`, `:id/thumbnail`, `:id/repair` |
 | `upload` | `init`, `:id/status`, `:id/chunk/:index`, `:id/complete`, abort |
 | `trash` | list, restore, delete one, empty |
 | `drives` | list, get, disconnect, health check |
@@ -137,7 +137,7 @@ audit/              readiness audits
 - Without `REDIS_URL` the scheduled jobs live in the backend process, so they assume a single instance and a job interrupted by a restart waits for its next tick.
 - Moving a chunk during a rebalance can interrupt a download of that file that is already in progress.
 - Rename, new-folder and delete prompts use the browser's built-in dialogs.
-- Files are moved through a folder picker; there is no drag-and-drop and no multi-select yet.
+- Files are moved through a folder picker rather than drag-and-drop. Bulk delete and move run one request per item, so a large selection takes a moment.
 - The rate limiter keeps its counts in memory, so it is only correct with a single backend instance.
 - Resuming an upload matches a file by name, size and modification time, so editing a file before resuming would mix old and new chunks. Renaming it first forces a clean upload.
 

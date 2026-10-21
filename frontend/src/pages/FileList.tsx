@@ -77,6 +77,9 @@ export default function FileList() {
   const [notice, setNotice] = useState<{ kind: 'error' | 'info'; text: string } | null>(null);
   const [previewing, setPreviewing] = useState<FileItem | null>(null);
   const [moving, setMoving] = useState<FileItem | null>(null);
+  const [movingMany, setMovingMany] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<string | null>(null);
 
   const listQuery = useInfiniteQuery({
     queryKey: ['files', folderId ?? 'root'],
@@ -201,11 +204,65 @@ export default function FileList() {
       await navigator.clipboard.writeText(url).catch(() => window.prompt('Share link', url));
     }, 'Share link copied to clipboard');
 
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const selectedFiles = () => files.filter((file) => selected.has(file.id));
+
+  // One request per item, reported as it goes: the API has no batch endpoint, and doing it
+  // this way means a failure halfway leaves the rest of the selection untouched and visible.
+  const runOnSelection = async (label: string, action: (file: FileItem) => Promise<unknown>) => {
+    const batch = selectedFiles();
+    let done = 0;
+    let failed = 0;
+    for (const file of batch) {
+      setBulkProgress(`${label} ${done + 1} of ${batch.length}…`);
+      try {
+        await action(file);
+      } catch {
+        failed++;
+      }
+      done++;
+    }
+    setBulkProgress(null);
+    setSelected(new Set());
+    refresh();
+    setNotice(
+      failed === 0
+        ? { kind: 'info', text: `${label} ${batch.length} item(s).` }
+        : { kind: 'error', text: `${label} ${batch.length - failed} of ${batch.length}; ${failed} failed.` }
+    );
+  };
+
+  const trashSelection = () => {
+    const batch = selectedFiles();
+    if (window.confirm(`Move ${batch.length} item(s) to the trash?`)) {
+      runOnSelection('Moved to trash', (file) => api.delete(`/files/${file.id}`));
+    }
+  };
+
+  const moveSelection = (destinationId: string | null) => {
+    setMovingMany(false);
+    runOnSelection('Moved', (file) => api.patch(`/files/${file.id}`, { parentFolderId: destinationId }));
+  };
+
   const open = (file: FileItem) => {
     if (file.is_folder) navigate(`/files/${file.id}`);
     else if (canPreview(file.mime_type)) setPreviewing(file);
     else window.location.assign(getDownloadUrl(file.id));
   };
+
+  const visibleKey = `${folderId ?? 'root'}:${searchQuery ?? ''}`;
+  const [selectionKey, setSelectionKey] = useState(visibleKey);
+  if (selectionKey !== visibleKey) {
+    setSelectionKey(visibleKey);
+    if (selected.size > 0) setSelected(new Set());
+  }
 
   const isLoading = searchQuery ? searchResults.isLoading : listQuery.isLoading;
   const isError = searchQuery ? searchResults.isError : listQuery.isError;
@@ -214,6 +271,14 @@ export default function FileList() {
   return (
     <div className="space-y-6 animate-fade-in">
       {previewing && <PreviewModal file={previewing} onClose={() => setPreviewing(null)} />}
+      {movingMany && (
+        <MoveDialog
+          item={{ id: '', name: `${selected.size} item(s)`, is_folder: false }}
+          currentParentId={folderId ?? null}
+          onCancel={() => setMovingMany(false)}
+          onMove={moveSelection}
+        />
+      )}
       {moving && (
         <MoveDialog
           item={moving}
@@ -273,6 +338,24 @@ export default function FileList() {
         </div>
       )}
 
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-100 px-4 py-3 text-sm" role="status">
+          <span className="font-medium text-slate-700">{selected.size} selected</span>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-secondary" disabled={Boolean(bulkProgress)} onClick={() => setMovingMany(true)}>
+              Move
+            </button>
+            <button className="btn-secondary" disabled={Boolean(bulkProgress)} onClick={trashSelection}>
+              Delete
+            </button>
+            <button className="btn-secondary" onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+          </div>
+          {bulkProgress && <span className="text-slate-500">{bulkProgress}</span>}
+        </div>
+      )}
+
       {uploads.length > 0 && (
         <div className="card divide-y divide-slate-50" role="status" aria-live="polite">
           {uploads.map((task) => (
@@ -328,6 +411,15 @@ export default function FileList() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/50">
+                <th className="w-10 px-3 py-4">
+                  <input
+                    type="checkbox"
+                    aria-label="Select every file shown"
+                    className="h-4 w-4 rounded border-slate-300"
+                    checked={files.length > 0 && selected.size === files.length}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(files.map((f) => f.id)) : new Set())}
+                  />
+                </th>
                 <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
                 <th className="hidden sm:table-cell text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Size</th>
                 <th className="hidden md:table-cell text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Modified</th>
@@ -336,7 +428,16 @@ export default function FileList() {
             </thead>
             <tbody className="divide-y divide-slate-50">
               {files.map((file) => (
-                <tr key={file.id} className="hover:bg-blue-50/40 transition-colors duration-200 group">
+                <tr key={file.id} className={`transition-colors duration-200 group ${selected.has(file.id) ? 'bg-blue-50/60' : 'hover:bg-blue-50/40'}`}>
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${file.name}`}
+                      className="h-4 w-4 rounded border-slate-300"
+                      checked={selected.has(file.id)}
+                      onChange={() => toggle(file.id)}
+                    />
+                  </td>
                   <td className="min-w-0 px-4 py-3 sm:px-6">
                     <button onClick={() => open(file)} className="flex w-full items-center gap-3 text-left">
                       <FileIcon file={file} />

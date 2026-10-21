@@ -30,6 +30,8 @@ vi.mock('../services/chunk-store', () => {
 // Small chunks so a few KB exercises multi-chunk files. Must be set before the app loads.
 process.env.CHUNK_SIZE_BYTES = '1024';
 process.env.MAX_FILE_SIZE_BYTES = '2000000';
+// This suite makes hundreds of calls as one user; the limiter itself is unit tested.
+process.env.RATE_LIMIT_MAX = '100000';
 process.env.NODE_ENV = 'test';
 
 const { app } = await import('../app');
@@ -385,6 +387,9 @@ describe('security', () => {
     expect(res.headers.get('content-security-policy')).toContain("default-src 'none'");
     expect(res.headers.get('permissions-policy')).toContain('camera=()');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    // Every signed-in response is counted against the caller's budget.
+    expect(res.headers.get('x-ratelimit-limit')).toBeTruthy();
+    expect(res.headers.get('x-request-id')).toBeTruthy();
   });
 
   it('retires existing sessions when the user signs out everywhere', async () => {
@@ -522,6 +527,23 @@ describe('insufficient storage', () => {
     expect(body.error.details.availableBytes).toBeLessThan(1_000_000);
     expect(body.error.details.drives).toHaveLength(3);
     expect(body.error.details.drives[0]).toHaveProperty('availableBytes');
+  });
+});
+
+describe('recent files', () => {
+  it('lists the newest files across folders, newest first', async () => {
+    const folder = (await (await api.post('/files', { name: 'Recent' })).json()) as any;
+    const older = await upload(api, new Uint8Array(randomBytes(80)), 'older.bin', folder.id);
+    const newer = await upload(api, new Uint8Array(randomBytes(80)), 'newer.bin');
+
+    const files = (await (await api.get('/files/recent?limit=5')).json() as any).files as Array<{ id: string }>;
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.length).toBeLessThanOrEqual(5);
+    const ids = files.map((f) => f.id);
+    expect(ids).toContain(newer.fileId);
+    expect(ids.indexOf(newer.fileId)).toBeLessThan(ids.indexOf(older.fileId) === -1 ? 99 : ids.indexOf(older.fileId));
+    // Folders are not files.
+    expect(ids).not.toContain(folder.id);
   });
 });
 

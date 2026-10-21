@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { createFolder, getBreadcrumbs, getFileById, listFiles, searchFiles, trashFile, updateFile } from '../services/files';
+import { createFolder, getBreadcrumbs, getFileById, listFiles, listRecentFiles, searchFiles, trashFile, updateFile } from '../services/files';
 import { logActivity } from '../services/activity';
 import { listFileIssues, repairFile } from '../services/replication';
 import { parseBody } from '../middleware/validation';
@@ -31,6 +31,12 @@ fileRoutes.get('/search', async (c) => {
 fileRoutes.get('/issues', async (c) => {
   const userId = (c as any).get('userId') as string;
   return c.json({ issues: await listFileIssues(userId) });
+});
+
+fileRoutes.get('/recent', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  const limit = parseInt(c.req.query('limit') || '8') || 8;
+  return c.json({ files: await listRecentFiles(userId, limit) });
 });
 
 fileRoutes.get('/', async (c) => {

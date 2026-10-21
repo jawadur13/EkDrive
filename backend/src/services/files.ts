@@ -255,6 +255,15 @@ export async function removeFiles(ids: string[]) {
   ]);
 }
 
+// The newest files across every folder, for the dashboard.
+export async function listRecentFiles(userId: string, limit = 8) {
+  return prisma.file.findMany({
+    where: { user_id: userId, is_folder: false, status: FILE_STATUS.ready, trashed_at: null },
+    orderBy: { updated_at: 'desc' },
+    take: Math.min(Math.max(limit, 1), 50),
+  });
+}
+
 export async function searchFiles(userId: string, query: string) {
   return prisma.file.findMany({
     where: {

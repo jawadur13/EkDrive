@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
-import { formatBytes } from '../utils/format';
+import { formatBytes, timeAgo } from '../utils/format';
 
 interface Analytics {
   totals: {
@@ -170,6 +170,55 @@ function UploadTimeline({ days }: { days: Analytics['timeline'] }) {
   );
 }
 
+interface RecentFile {
+  id: string;
+  name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  updated_at: string;
+}
+
+function RecentFiles() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['recent-files'],
+    queryFn: () => api.get('/files/recent').then((r) => r.data.files as RecentFile[]),
+  });
+
+  return (
+    <div className="card">
+      <div className="card-header flex items-center justify-between">
+        <h2 className="text-base font-semibold text-slate-900">Recent files</h2>
+        <Link to="/files" className="text-xs text-blue-600 hover:underline">All files</Link>
+      </div>
+      <div className="card-body">
+        {isLoading ? (
+          <div className="skeleton h-10 w-full" />
+        ) : (data ?? []).length === 0 ? (
+          <p className="text-sm text-slate-400">Nothing uploaded yet.</p>
+        ) : (
+          <ul className="divide-y divide-slate-50">
+            {data!.map((file) => (
+              <li key={file.id} className="flex items-center justify-between gap-4 py-2">
+                <a
+                  href={`/api/v1/files/${file.id}/preview`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="min-w-0 flex-1 truncate text-sm text-slate-700 hover:text-blue-600"
+                >
+                  {file.name}
+                </a>
+                <span className="shrink-0 text-xs text-slate-400 tabular-nums">
+                  {formatBytes(file.size_bytes)} · {timeAgo(file.updated_at)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['analytics'],
@@ -210,6 +259,7 @@ export default function Dashboard() {
       <div className="grid gap-6 lg:grid-cols-2">
         <UploadTimeline days={data.timeline} />
         <ByType rows={data.byType} />
+        <RecentFiles />
       </div>
 
       <details className="card">
