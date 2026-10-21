@@ -8,7 +8,7 @@ export interface Drive {
   total_quota_bytes: number | null;
   used_quota_bytes: number | null;
   available_quota_bytes: number | null;
-  status: 'online' | 'degraded' | 'quota_exceeded' | 'offline' | string;
+  status: 'online' | 'degraded' | 'quota_exceeded' | 'reconnecting' | 'offline' | string;
   last_health_check: string | null;
 }
 

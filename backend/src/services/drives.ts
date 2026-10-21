@@ -10,6 +10,8 @@ export const DRIVE_STATUS = {
   degraded: 'degraded',
   /** Reachable and completely full: readable, but nothing new can be written to it. */
   quota_exceeded: 'quota_exceeded',
+  /** Google refused the stored credentials; the user has to grant access again. */
+  reconnecting: 'reconnecting',
   offline: 'offline',
 } as const;
 

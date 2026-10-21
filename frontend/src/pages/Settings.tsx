@@ -26,7 +26,8 @@ function DriveRow({ drive, onError, onReconnect }: { drive: Drive; onError: (mes
   const total = drive.total_quota_bytes;
   const percent = total ? Math.min(100, (used / total) * 100) : 0;
   const badge = drive.status === 'online' ? 'badge-online' : drive.status === 'offline' ? 'badge-offline' : 'badge-degraded';
-  const statusLabel = drive.status === 'quota_exceeded' ? 'full' : drive.status;
+  const statusLabel =
+    drive.status === 'quota_exceeded' ? 'full' : drive.status === 'reconnecting' ? 'needs reconnect' : drive.status;
 
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -55,7 +56,7 @@ function DriveRow({ drive, onError, onReconnect }: { drive: Drive; onError: (mes
           {drive.last_health_check && ` · checked ${timeAgo(drive.last_health_check)}`}
         </p>
       </div>
-      {drive.status === 'offline' && (
+      {(drive.status === 'offline' || drive.status === 'reconnecting') && (
         <button className="btn-secondary" disabled={busy} onClick={onReconnect}>
           Reconnect
         </button>

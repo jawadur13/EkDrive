@@ -25,7 +25,10 @@ export async function checkDriveHealth(driveId: string) {
       else if (free < LOW_SPACE_RATIO) status = DRIVE_STATUS.degraded;
     }
   } catch (error: any) {
-    status = DRIVE_STATUS.offline;
+    // A credential problem is a different thing from an unreachable drive: it needs the user
+    // to grant access again, and no amount of retrying will fix it.
+    const code = error?.code ?? error?.response?.status;
+    status = code === 401 || code === 403 ? DRIVE_STATUS.reconnecting : DRIVE_STATUS.offline;
     errorMessage = error?.message || 'Unknown error';
   }
   const latencyMs = Date.now() - startTime;
@@ -55,6 +58,13 @@ export async function checkDriveHealth(driveId: string) {
         severity: 'error',
         title: `${name} is unreachable`,
         body: `New uploads skip this drive. If it stays offline, reconnect it in Settings. (${errorMessage})`,
+      });
+    } else if (status === DRIVE_STATUS.reconnecting) {
+      await notify(drive.user_id, {
+        type: 'drive.offline',
+        severity: 'error',
+        title: `${name} needs to be reconnected`,
+        body: 'Google refused the stored credentials. Open Settings and use Reconnect to grant access again.',
       });
     } else if (status === DRIVE_STATUS.quota_exceeded) {
       await notify(drive.user_id, {

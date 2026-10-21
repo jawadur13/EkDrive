@@ -2,6 +2,7 @@ import type { Drive } from '@prisma/client';
 import type { drive_v3 } from 'googleapis';
 import { prisma } from '../db/client';
 import { getDriveApi } from '../utils/drive-auth';
+import { logger } from '../utils/logger';
 import { WRITABLE_DRIVE_STATUSES } from './drives';
 import { notify } from './notifications';
 import { repairFile } from './replication';
@@ -26,7 +27,15 @@ export async function getSyncStatus(userId: string) {
   }));
 }
 
-export async function syncDrive(drive: Drive) {
+// Google rejects a page token that is too old or belongs to a reset history. There is no
+// useful recovery beyond starting a fresh watch: the past changes are gone either way.
+export function isExpiredPageToken(error: any) {
+  const status = error?.code ?? error?.response?.status;
+  const reason = error?.errors?.[0]?.reason ?? error?.response?.data?.error?.errors?.[0]?.reason;
+  return status === 400 || status === 410 || reason === 'invalidSharingRequest' || reason === 'pageTokenInvalid';
+}
+
+export async function syncDrive(drive: Drive): Promise<Record<string, unknown>> {
   const api = getDriveApi(drive);
 
   if (!drive.sync_page_token) {
@@ -42,12 +51,23 @@ export async function syncDrive(drive: Drive) {
   const affectedFiles = new Set<string>();
 
   while (pageToken) {
-    const response: { data: drive_v3.Schema$ChangeList } = await api.changes.list({
-      pageToken,
-      spaces: 'drive',
-      pageSize: 1000,
-      fields: 'nextPageToken,newStartPageToken,changes(fileId,removed,file(trashed))',
-    });
+    let response: { data: drive_v3.Schema$ChangeList };
+    try {
+      response = await api.changes.list({
+        pageToken,
+        spaces: 'drive',
+        pageSize: 1000,
+        fields: 'nextPageToken,newStartPageToken,changes(fileId,removed,file(trashed))',
+      });
+    } catch (error) {
+      if (!isExpiredPageToken(error)) throw error;
+      // Start watching again from now. Anything deleted while the token was stale is caught
+      // by the next repair pass instead.
+      const start = await api.changes.getStartPageToken({});
+      await prisma.drive.update({ where: { id: drive.id }, data: { sync_page_token: start.data.startPageToken } });
+      logger.warn({ driveId: drive.id }, 'Sync page token had expired; watching again from now');
+      return { drive_id: drive.id, status: 'reset', changes_count: changesCount, missing_chunks: missingChunks };
+    }
 
     for (const change of response.data.changes ?? []) {
       changesCount++;

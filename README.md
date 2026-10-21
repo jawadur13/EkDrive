@@ -30,6 +30,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 - **Names stay distinct.** A second `report.pdf` in the same folder is stored as `report (2).pdf`; renaming onto a taken name is refused.
 - **Thumbnails.** Image files get a 256px thumbnail, made the first time the list asks for one and then kept in the database, so a folder of photos does not re-read every file from Google.
 - **Trash.** Deleting moves an item to the trash for 30 days. Trashed files keep using Google space until they are purged.
+- **Drive states.** `online`, `degraded` (nearly full), `quota_exceeded` (full), `reconnecting` (Google refused the stored credentials — use Reconnect in Settings) and `offline`. Only the first two take new chunks.
 - **Self-repair.** When a chunk is deleted outside EkDrive, sync marks that copy missing, rebuilds it from another copy and notifies you. A file with no copy left is reported as damaged. `POST /api/v1/files/:id/repair` runs a repair on demand.
 - **Background jobs**: drive health every 15 minutes, change sync every 10 minutes, and a daily cleanup of abandoned uploads, expired trash, expired share links and old records. They run on timers inside the backend process; with `REDIS_URL` set they run as BullMQ repeatable jobs instead, which survives a restart mid-job and spreads the work across instances.
 
