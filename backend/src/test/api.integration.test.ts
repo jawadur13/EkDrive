@@ -5,10 +5,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
 // an in-memory blob store, so placement, checksums, replicas and reassembly all run for real.
 vi.mock('../services/chunk-store', () => {
   const blobs = new Map<string, Uint8Array>();
+  const failingDrives = new Set<string>();
   let counter = 0;
   return {
     __blobs: blobs,
-    uploadChunkToDrive: vi.fn(async (_drive: unknown, _name: string, data: Uint8Array) => {
+    __failingDrives: failingDrives,
+    uploadChunkToDrive: vi.fn(async (drive: { id: string }, _name: string, data: Uint8Array) => {
+      if (failingDrives.has(drive.id)) throw new Error(`drive ${drive.id} refused the write`);
       const id = `fake-${++counter}-${Math.random().toString(36).slice(2)}`;
       blobs.set(id, new Uint8Array(data));
       return id;
@@ -26,13 +29,14 @@ vi.mock('../services/chunk-store', () => {
 
 // Small chunks so a few KB exercises multi-chunk files. Must be set before the app loads.
 process.env.CHUNK_SIZE_BYTES = '1024';
+process.env.MAX_FILE_SIZE_BYTES = '2000000';
 process.env.NODE_ENV = 'test';
 
 const { app } = await import('../app');
 const { prisma } = await import('../db/client');
 const { env } = await import('../env');
 const { encrypt } = await import('../utils/crypto');
-const { computeChecksum } = await import('../services/chunking');
+const { computeChecksum, createFileHasher } = await import('../services/chunking');
 const chunkStore = (await import('../services/chunk-store')) as any;
 const jwt = (await import('jsonwebtoken')).default;
 
@@ -91,7 +95,9 @@ async function upload(api: ReturnType<typeof client>, data: Uint8Array, name: st
     const res = await api.post(`/upload/${fileId}/chunk/${i}`, chunk, { 'x-chunk-checksum': await computeChecksum(chunk) });
     expect(res.status).toBe(200);
   }
-  const done = await api.post(`/upload/${fileId}/complete`, {});
+  const hasher = await createFileHasher();
+  hasher.update(data);
+  const done = await api.post(`/upload/${fileId}/complete`, { checksum: hasher.digest() });
   expect(done.status).toBe(200);
   return { fileId, chunkCount };
 }
@@ -375,6 +381,90 @@ describe('repair and rebalance', () => {
     await rebalanceUser(owner.user.id);
     expect(await prisma.chunk.count({ where: { file_id: fileId } })).toBe(2);
     await api.put('/storage-mode', { mode: 'balanced' });
+  });
+});
+
+describe('resumable and fault-tolerant upload', () => {
+  it('reports which chunks are still missing and refuses to complete early', async () => {
+    const data = new Uint8Array(randomBytes(2500));
+    const init = (await (await api.post('/upload/init', { name: 'resume.bin', sizeBytes: data.byteLength })).json()) as any;
+    expect(init.placement).toHaveLength(3);
+
+    const chunk0 = data.subarray(0, init.chunkSize);
+    await api.post(`/upload/${init.fileId}/chunk/0`, chunk0, { 'x-chunk-checksum': await computeChecksum(chunk0) });
+
+    const status = (await (await api.get(`/upload/${init.fileId}/status`)).json()) as any;
+    expect(status.status).toBe('uploading');
+    expect(status.uploadedChunks).toEqual([0]);
+    expect(status.missingChunks).toEqual([1, 2]);
+
+    expect((await api.post(`/upload/${init.fileId}/complete`, {})).status).toBe(409);
+
+    // Sending only what is missing finishes the file, as a resumed upload would.
+    for (const index of status.missingChunks as number[]) {
+      const chunk = data.subarray(index * init.chunkSize, (index + 1) * init.chunkSize);
+      const res = await api.post(`/upload/${init.fileId}/chunk/${index}`, chunk, { 'x-chunk-checksum': await computeChecksum(chunk) });
+      expect(res.status).toBe(200);
+    }
+    expect((await api.post(`/upload/${init.fileId}/complete`, {})).status).toBe(200);
+
+    const download = await api.get(`/files/${init.fileId}/download`);
+    expect(Buffer.from(await download.arrayBuffer()).equals(Buffer.from(data))).toBe(true);
+  });
+
+  it('moves a chunk to another drive when its own drive refuses the write', async () => {
+    const drives = (await (await api.get('/drives')).json() as any).drives as Array<{ id: string }>;
+    const survivor = drives[2].id;
+    for (const drive of drives) if (drive.id !== survivor) chunkStore.__failingDrives.add(drive.id);
+
+    try {
+      const data = new Uint8Array(randomBytes(500));
+      const { fileId } = await upload(api, data, 'failover.bin');
+      const chunks = await prisma.chunk.findMany({ where: { file_id: fileId } });
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0].drive_id).toBe(survivor);
+
+      const res = await api.get(`/files/${fileId}/download`);
+      expect(Buffer.from(await res.arrayBuffer()).equals(Buffer.from(data))).toBe(true);
+    } finally {
+      chunkStore.__failingDrives.clear();
+    }
+  });
+
+  it('fails the chunk when no drive will take it', async () => {
+    const drives = (await (await api.get('/drives')).json() as any).drives as Array<{ id: string }>;
+    for (const drive of drives) chunkStore.__failingDrives.add(drive.id);
+
+    try {
+      const data = new Uint8Array(randomBytes(300));
+      const init = (await (await api.post('/upload/init', { name: 'doomed.bin', sizeBytes: data.byteLength })).json()) as any;
+      const res = await api.post(`/upload/${init.fileId}/chunk/0`, data, { 'x-chunk-checksum': await computeChecksum(data) });
+      expect(res.status).toBe(502);
+      expect((await api.del(`/upload/${init.fileId}`)).status).toBe(200);
+    } finally {
+      chunkStore.__failingDrives.clear();
+    }
+  });
+
+  it('refuses a file over the size limit', async () => {
+    const res = await api.post('/upload/init', { name: 'enormous.bin', sizeBytes: 3_000_000 });
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as any).error.code).toBe('FILE_TOO_LARGE');
+  });
+});
+
+describe('whole-file integrity', () => {
+  it('aborts a download whose chunks no longer add up to the stored checksum', async () => {
+    const data = new Uint8Array(randomBytes(1500));
+    const { fileId } = await upload(api, data, 'tampered.bin');
+
+    // The bytes are intact and every chunk checksum still matches; only the file-level hash
+    // disagrees, which is what reordered or substituted chunks would look like.
+    await prisma.file.update({ where: { id: fileId }, data: { checksum: 'deadbeefdeadbeef' } });
+
+    const res = await api.get(`/files/${fileId}/download`);
+    expect(res.status).toBe(200);
+    await expect(res.arrayBuffer()).rejects.toThrow();
   });
 });
 

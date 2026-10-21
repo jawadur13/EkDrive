@@ -12,6 +12,16 @@ export async function computeChecksum(data: Uint8Array): Promise<string> {
   return hasher.h64Raw(data).toString(16);
 }
 
+// Hashes a whole file as the browser does: the same xxhash64, fed chunk by chunk.
+export async function createFileHasher() {
+  hasherPromise ??= xxhash();
+  const hasher = (await hasherPromise).create64();
+  return {
+    update: (data: Uint8Array) => hasher.update(data),
+    digest: () => hasher.digest().toString(16),
+  };
+}
+
 // One record per (chunk, drive) — a chunk with replicas has several.
 export async function createChunkRecords(fileId: string, placement: ChunkPlacement[]) {
   await prisma.chunk.createMany({

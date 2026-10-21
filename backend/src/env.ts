@@ -48,6 +48,10 @@ export const env = {
   get chunkSize() {
     return parseInt(process.env.CHUNK_SIZE_BYTES || '52428800');
   },
+  /** Refuse uploads larger than this. 10 GiB by default. */
+  get maxFileSize() {
+    return parseInt(process.env.MAX_FILE_SIZE_BYTES || String(10 * 1024 ** 3));
+  },
   get rateLimitMax() {
     return parseInt(process.env.RATE_LIMIT_MAX || '100');
   },

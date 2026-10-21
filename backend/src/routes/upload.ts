@@ -2,12 +2,13 @@ import { env } from '../env';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
+import type { Chunk, Drive } from '@prisma/client';
 import { prisma } from '../db/client';
 import { parseBody } from '../middleware/validation';
 import { assignChunksToDrives, getChunkCount, getReplicaCount } from '../services/storage-engine';
 import { computeChecksum, createChunkRecords } from '../services/chunking';
 import { uploadChunkToDrive } from '../services/chunk-store';
-import { adjustDriveUsage } from '../services/drives';
+import { adjustDriveUsage, findFallbackDrive } from '../services/drives';
 import { buildVirtualPath, FILE_STATUS, removeFiles, resolveParentFolder, validateName } from '../services/files';
 import { getStorageMode } from '../services/storage-mode';
 import { HttpError, notFound } from '../utils/errors';
@@ -37,6 +38,10 @@ uploadRoutes.post('/init', async (c) => {
   const name = validateName(body.name);
   const parent = await resolveParentFolder(userId, body.parentFolderId);
 
+  if (body.sizeBytes > env.maxFileSize) {
+    throw new HttpError(413, 'FILE_TOO_LARGE', `Files are limited to ${env.maxFileSize} bytes`);
+  }
+
   const storageMode = await getStorageMode(userId);
   const placement = await assignChunksToDrives(userId, body.sizeBytes, storageMode.mode as any, storageMode.min_replicas);
   if (!placement) {
@@ -60,8 +65,90 @@ uploadRoutes.post('/init', async (c) => {
   });
   await createChunkRecords(file.id, placement);
 
-  return c.json({ fileId: file.id, chunkSize: env.chunkSize, chunkCount }, 201);
+  return c.json(
+    {
+      fileId: file.id,
+      chunkSize: env.chunkSize,
+      chunkCount,
+      // Where each chunk is headed, so the client can show the spread before it starts.
+      placement: placement.map((p) => ({ chunkIndex: p.chunkIndex, chunkSize: p.chunkSize, driveIds: p.driveIds })),
+    },
+    201
+  );
 });
+
+// Which chunks are already stored. The client calls this when it resumes an upload it
+// started earlier, so it only sends what is still missing.
+uploadRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/status', async (c) => {
+  const userId = (c as any).get('userId') as string;
+  const fileId = c.req.param('fileId');
+  const file = await prisma.file.findFirst({ where: { id: fileId, user_id: userId } });
+  if (!file) throw notFound('File');
+
+  const chunks = await prisma.chunk.findMany({
+    where: { file_id: file.id },
+    select: { chunk_index: true, upload_status: true },
+  });
+
+  const done = new Set<number>();
+  const pending = new Set<number>();
+  for (const chunk of chunks) {
+    (chunk.upload_status === 'uploaded' ? done : pending).add(chunk.chunk_index);
+  }
+  // A chunk counts as complete only when every copy of it is stored.
+  const uploaded = [...done].filter((index) => !pending.has(index)).sort((a, b) => a - b);
+  const missing = Array.from({ length: file.chunk_count }, (_, i) => i).filter((i) => !uploaded.includes(i));
+
+  return c.json({
+    fileId: file.id,
+    name: file.name,
+    status: file.status,
+    sizeBytes: file.size_bytes,
+    chunkSize: env.chunkSize,
+    chunkCount: file.chunk_count,
+    uploadedChunks: uploaded,
+    missingChunks: missing,
+  });
+});
+
+type ChunkWithDrive = Chunk & { drive: Drive };
+
+// Stores one copy. If its drive refuses the write, the copy moves to another drive that has
+// room, so one bad account does not fail the upload.
+async function storeReplica(fileId: string, chunkIndex: number, replica: ChunkWithDrive, data: Uint8Array, checksum: string, userId: string, taken: string[]) {
+  const attempt = async (drive: Drive) => {
+    const googleFileId = await uploadChunkToDrive(drive, `ekdrive-${fileId}-${chunkIndex}`, data);
+    await prisma.chunk.update({
+      where: { id: replica.id },
+      data: { drive_id: drive.id, google_file_id: googleFileId, checksum, upload_status: 'uploaded', updated_at: new Date() },
+    });
+    await adjustDriveUsage(drive.id, replica.size_bytes);
+    return drive.id;
+  };
+
+  try {
+    return await attempt(replica.drive);
+  } catch (error) {
+    console.warn(`Chunk ${chunkIndex} of ${fileId} could not be stored on drive ${replica.drive_id}:`, error);
+  }
+
+  // The drive that just refused is excluded too, or the fallback picks it straight back.
+  const fallback = await findFallbackDrive(userId, [...taken, replica.drive_id], replica.size_bytes);
+  if (!fallback) {
+    await prisma.chunk.update({ where: { id: replica.id }, data: { upload_status: 'failed', updated_at: new Date() } });
+    return null;
+  }
+
+  try {
+    const driveId = await attempt(fallback);
+    console.log(`Chunk ${chunkIndex} of ${fileId} moved to drive ${driveId} after a failure`);
+    return driveId;
+  } catch (error) {
+    console.error(`Fallback drive ${fallback.id} also refused chunk ${chunkIndex} of ${fileId}:`, error);
+    await prisma.chunk.update({ where: { id: replica.id }, data: { upload_status: 'failed', updated_at: new Date() } });
+    return null;
+  }
+}
 
 // Body: raw chunk bytes. Header x-chunk-checksum: xxhash64 hex computed by the client.
 // Safe to retry: copies already stored are skipped.
@@ -93,25 +180,21 @@ uploadRoutes.post(
       throw new HttpError(400, 'CHECKSUM_MISMATCH', 'Chunk checksum does not match its contents');
     }
 
-    const failures: string[] = [];
+    // Copies of one chunk must live on different drives, including after a fallback.
+    const taken = replicas.filter((r) => r.upload_status === 'uploaded').map((r) => r.drive_id);
+    let failures = 0;
     for (const replica of replicas) {
       if (replica.upload_status === 'uploaded') continue;
-      try {
-        const googleFileId = await uploadChunkToDrive(replica.drive, `ekdrive-${file.id}-${chunkIndex}`, data);
-        await prisma.chunk.update({
-          where: { id: replica.id },
-          data: { google_file_id: googleFileId, checksum, upload_status: 'uploaded', updated_at: new Date() },
-        });
-        await adjustDriveUsage(replica.drive_id, replica.size_bytes);
-      } catch (error) {
-        console.error(`Uploading chunk ${chunkIndex} of ${file.id} to drive ${replica.drive_id} failed:`, error);
-        await prisma.chunk.update({ where: { id: replica.id }, data: { upload_status: 'failed', updated_at: new Date() } });
-        failures.push(replica.drive_id);
-      }
+      const driveId = await storeReplica(file.id, chunkIndex, replica, data, checksum, userId, [
+        ...taken,
+        ...replicas.filter((r) => r.id !== replica.id).map((r) => r.drive_id),
+      ]);
+      if (driveId) taken.push(driveId);
+      else failures++;
     }
 
-    if (failures.length > 0) {
-      return c.json({ error: { code: 'DRIVE_ERROR', message: `Could not store chunk on ${failures.length} drive(s); retry the chunk` } }, 502);
+    if (failures > 0) {
+      return c.json({ error: { code: 'DRIVE_ERROR', message: `Could not store chunk on ${failures} drive(s); retry the chunk` } }, 502);
     }
 
     const [uploaded, total] = await Promise.all([

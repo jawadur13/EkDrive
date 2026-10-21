@@ -9,7 +9,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 | Area | State |
 |---|---|
 | Google sign-in, connecting several accounts as drives | Working |
-| Chunked upload, download, range streaming | Working |
+| Chunked upload (parallel, resumable), download, range streaming | Working |
 | Folders, search, share links, trash | Working |
 | Storage modes, rebalancing, self-repair | Working |
 | Drive health, change sync | Working |
@@ -19,7 +19,8 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 ## How it works
 
 - **Accounts as drives.** The Google account you sign in with becomes your first drive; Settings → Connect Drive adds more. Each drive keeps its own OAuth tokens, encrypted with AES-256-GCM, and refreshes them on its own.
-- **Chunks.** Files are split into `CHUNK_SIZE_BYTES` chunks (50 MB by default) and stored in an `EkDrive` folder on each account. The browser computes an xxhash64 checksum per chunk; the server verifies it on upload and again on every download.
+- **Chunks.** Files are split into `CHUNK_SIZE_BYTES` chunks (50 MB by default) and stored in an `EkDrive` folder on each account. Four chunks upload at a time. The browser computes an xxhash64 checksum per chunk; the server verifies it on upload and again on every download, and checks the whole-file hash when a complete file is downloaded.
+- **Interrupted uploads resume.** Pick the same file again and only the missing chunks are sent. If a drive refuses a write mid-upload, that chunk moves to another drive with room instead of failing the upload.
 - **Storage modes** — applied to new uploads, and to existing files when you rebalance:
   - *Balanced*: each chunk goes to the drive that stays least utilized.
   - *Maximum capacity*: each chunk goes to the drive with the most free space.
@@ -56,6 +57,7 @@ Every variable lives in `.env.local` at the repo root; `.env.example` documents 
 | `REDIS_URL` | no | A `redis://` or `rediss://` TCP URL. Without it, jobs run on in-process timers |
 | `BACKEND_URL`, `CORS_ORIGIN`, `PORT` | no | Defaults are localhost 3000 / 5173 |
 | `CHUNK_SIZE_BYTES` | no | 50 MB by default |
+| `MAX_FILE_SIZE_BYTES` | no | 10 GiB by default |
 | `RATE_LIMIT_MAX`, `TRUST_PROXY` | no | `TRUST_PROXY=true` only behind a proxy you control |
 
 ## Scripts
@@ -83,7 +85,7 @@ All routes are under `/api/v1` and need the session cookie, except `/auth/login`
 |---|---|
 | `auth` | `login`, `callback`, `connect`, `me`, `logout` |
 | `files` | list, search, issues, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/preview`, `:id/repair` |
-| `upload` | `init`, `:id/chunk/:index`, `:id/complete`, abort |
+| `upload` | `init`, `:id/status`, `:id/chunk/:index`, `:id/complete`, abort |
 | `trash` | list, restore, delete one, empty |
 | `drives` | list, get, disconnect, health check |
 | `storage-mode` | get, set, rebalance |
@@ -119,7 +121,7 @@ audit/              readiness audits
 - Moving a chunk during a rebalance can interrupt a download of that file that is already in progress.
 - Rename, new-folder and delete prompts use the browser's built-in dialogs.
 - The rate limiter keeps its counts in memory, so it is only correct with a single backend instance.
-- Uploads are not resumable across a page reload: the chunks already stored are kept, but the browser starts the file again.
+- Resuming an upload matches a file by name, size and modification time, so editing a file before resuming would mix old and new chunks. Renaming it first forces a clean upload.
 
 ## License
 

@@ -1,7 +1,7 @@
 import type { File } from '@prisma/client';
 import { prisma } from '../db/client';
 import { HttpError } from '../utils/errors';
-import { computeChecksum } from './chunking';
+import { computeChecksum, createFileHasher } from './chunking';
 import { downloadChunkFromDrive } from './chunk-store';
 
 export type ByteRange = { start: number; end: number };
@@ -57,9 +57,21 @@ export async function streamFileContent(file: File, range?: ByteRange | null): P
     while (index + 1 < offsets.length && offsets[index + 1] <= range.start) index++;
   }
 
+  // On a full download the chunks are also hashed together and checked against the hash the
+  // browser computed at upload, which catches a chunk that is intact but out of place.
+  const fileHasher = !range && file.checksum ? await createFileHasher() : null;
+
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       if (index >= file.chunk_count || (range && offsets[index] > range.end)) {
+        if (fileHasher && index >= file.chunk_count) {
+          const digest = fileHasher.digest();
+          if (digest !== file.checksum) {
+            console.error(`File ${file.id} failed its whole-file checksum: expected ${file.checksum}, got ${digest}`);
+            controller.error(new Error('File failed its integrity check'));
+            return;
+          }
+        }
         controller.close();
         return;
       }
@@ -71,6 +83,7 @@ export async function streamFileContent(file: File, range?: ByteRange | null): P
           if ((await computeChecksum(data)) !== replica.checksum) {
             throw new Error(`Checksum mismatch for chunk ${index} on drive ${replica.drive_id}`);
           }
+          fileHasher?.update(data);
           const from = range ? Math.max(0, range.start - offsets[index]) : 0;
           const to = range ? Math.min(data.byteLength, range.end - offsets[index] + 1) : data.byteLength;
           controller.enqueue(from === 0 && to === data.byteLength ? data : data.subarray(from, to));

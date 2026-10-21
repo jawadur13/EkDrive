@@ -142,3 +142,19 @@ export async function adjustDriveUsage(driveId: string, deltaBytes: bigint) {
     data: { used_quota_bytes: used < 0n ? 0n : used, available_quota_bytes: available < 0n ? 0n : available },
   });
 }
+
+// A drive that can take a chunk when its intended drive refuses it: writable, big enough,
+// and not already holding a copy of that same chunk.
+export async function findFallbackDrive(userId: string, excludeDriveIds: string[], sizeBytes: bigint) {
+  const candidates = await prisma.drive.findMany({
+    where: {
+      user_id: userId,
+      status: { in: WRITABLE_DRIVE_STATUSES },
+      id: { notIn: excludeDriveIds },
+      available_quota_bytes: { gte: sizeBytes },
+    },
+    orderBy: { available_quota_bytes: 'desc' },
+    take: 1,
+  });
+  return candidates[0] ?? null;
+}
