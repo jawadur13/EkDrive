@@ -1,5 +1,6 @@
 import { prisma } from '../db/client';
 import { logger } from '../utils/logger';
+import { publish } from './events';
 
 export type NotificationInput = {
   type: 'drive.offline' | 'drive.degraded' | 'drive.recovered' | 'chunks.missing' | 'file.damaged' | 'repair.done' | 'rebalance.done' | 'trash.purged';
@@ -24,9 +25,11 @@ export async function notify(userId: string, input: NotificationInput) {
       },
     });
     if (duplicate) return duplicate;
-    return await prisma.notification.create({
+    const created = await prisma.notification.create({
       data: { user_id: userId, type: input.type, severity: input.severity ?? 'info', title: input.title, body: input.body },
     });
+    publish(userId, { type: 'notification', title: created.title, severity: created.severity });
+    return created;
   } catch (error) {
     logger.warn({ err: error }, `Failed to create notification for ${userId}`);
     return null;

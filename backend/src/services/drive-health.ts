@@ -2,6 +2,7 @@ import { prisma } from '../db/client';
 import { getDriveApi } from '../utils/drive-auth';
 import { DRIVE_STATUS, quotaFromAbout } from './drives';
 import { notify } from './notifications';
+import { publish } from './events';
 
 // Below this much free space a drive is flagged. It stays writable until it is actually full.
 const LOW_SPACE_RATIO = 0.1;
@@ -51,6 +52,7 @@ export async function checkDriveHealth(driveId: string) {
   ]);
 
   if (status !== drive.status) {
+    publish(drive.user_id, { type: 'drives.changed', driveId: drive.id, status });
     const name = drive.google_email ?? drive.drive_name;
     if (status === DRIVE_STATUS.offline) {
       await notify(drive.user_id, {

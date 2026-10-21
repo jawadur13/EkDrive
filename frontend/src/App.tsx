@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuthStore } from './stores/authStore';
+import { useLiveUpdates } from './hooks/useLiveUpdates';
 
 const FileList = lazy(() => import('./pages/FileList'));
 const Login = lazy(() => import('./pages/Login'));
@@ -40,6 +41,9 @@ function App() {
   // Below lg the sidebar slides over the content instead of taking a column.
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
+
+  // One stream for the whole app; it opens once the session is known to be good.
+  useLiveUpdates(isAuthenticated);
 
   useEffect(() => {
     checkAuth();

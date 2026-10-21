@@ -4,6 +4,7 @@ import { parseBody } from '../middleware/validation';
 import { getStorageMode, updateStorageMode } from '../services/storage-mode';
 import { logActivity } from '../services/activity';
 import { notify } from '../services/notifications';
+import { publish } from '../services/events';
 import { isRebalancing, runExclusiveRebalance } from '../services/replication';
 import { HttpError } from '../utils/errors';
 import { logger } from '../utils/logger';
@@ -52,6 +53,12 @@ storageModeRoutes.post('/rebalance', (c) => {
     .then(async (result) => {
       if (!result) return;
       await logActivity(userId, 'storage.rebalanced', null, result);
+      publish(userId, {
+        type: 'rebalance.finished',
+        chunksMoved: result.chunksMoved,
+        copiesAdded: result.copiesAdded,
+        copiesRemoved: result.copiesRemoved,
+      });
       await notify(userId, {
         type: 'rebalance.done',
         severity: result.lostChunks > 0 ? 'warning' : 'info',

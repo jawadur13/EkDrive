@@ -16,6 +16,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 | Activity log, notifications, analytics dashboard | Working |
 | Health page: conflicts, repair, per-drive uptime history | Working |
 | Mobile layout, keyboard and screen-reader support | Basic |
+| Live updates over server-sent events | Working |
 
 ## How it works
 
@@ -32,6 +33,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 - **Trash.** Deleting moves an item to the trash for 30 days. Trashed files keep using Google space until they are purged.
 - **Drive states.** `online`, `degraded` (nearly full), `quota_exceeded` (full), `reconnecting` (Google refused the stored credentials — use Reconnect in Settings) and `offline`. Only the first two take new chunks.
 - **Self-repair.** When a chunk is deleted outside EkDrive, sync marks that copy missing, rebuilds it from another copy and notifies you. A file with no copy left is reported as damaged. `POST /api/v1/files/:id/repair` runs a repair on demand.
+- **Live updates.** The open page subscribes to `/api/v1/events`, a server-sent stream, so a background sync, a drive going offline or a finished rebalance shows up without the user refreshing. Polling stays as a slow fallback.
 - **Background jobs**: drive health every 15 minutes, change sync every 10 minutes, and a daily cleanup of abandoned uploads, expired trash, expired share links and old records. They run on timers inside the backend process; with `REDIS_URL` set they run as BullMQ repeatable jobs instead, which survives a restart mid-job and spreads the work across instances.
 
 ## Development setup
@@ -102,6 +104,7 @@ All routes are under `/api/v1` and need the session cookie, except `/auth/login`
 | `sync` | status, trigger, conflicts, resolve |
 | `drives/:id/health` | `POST` runs a check, `GET` returns recent checks with uptime |
 | `activity`, `notifications`, `analytics` | activity feed, notification list/read, dashboard figures |
+| `events` | server-sent stream of this user's changes |
 
 ## Project layout
 

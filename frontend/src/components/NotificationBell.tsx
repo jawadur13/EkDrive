@@ -26,7 +26,7 @@ export function NotificationBell() {
   const { data } = useQuery({
     queryKey: ['notifications'],
     queryFn: () => api.get('/notifications').then((r) => r.data as { items: Notification[]; unread: number }),
-    refetchInterval: 60000,
+    refetchInterval: 5 * 60 * 1000,
   });
 
   useEffect(() => {

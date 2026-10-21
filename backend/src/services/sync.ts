@@ -3,6 +3,7 @@ import type { drive_v3 } from 'googleapis';
 import { prisma } from '../db/client';
 import { getDriveApi } from '../utils/drive-auth';
 import { logger } from '../utils/logger';
+import { publish } from './events';
 import { WRITABLE_DRIVE_STATUSES } from './drives';
 import { notify } from './notifications';
 import { repairFile } from './replication';
@@ -120,6 +121,11 @@ export async function syncDrive(drive: Drive): Promise<Record<string, unknown>> 
           ? `${damaged.length} file(s) have no remaining copy of some data and cannot be fully downloaded. ${repaired} file(s) were repaired.`
           : `${repaired} file(s) were repaired from their other copies.`,
     });
+  }
+
+  if (missingChunks > 0 || repaired > 0) {
+    publish(drive.user_id, { type: 'sync.finished', missingChunks, filesRepaired: repaired });
+    publish(drive.user_id, { type: 'files.changed' });
   }
 
   return {

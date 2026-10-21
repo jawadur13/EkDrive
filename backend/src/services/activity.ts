@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
 import { logger } from '../utils/logger';
+import { publish } from './events';
 
 export type ActivityAction =
   | 'file.uploaded'
@@ -26,6 +27,10 @@ export async function logActivity(
   file?: { id: string; name: string } | null,
   details?: Prisma.InputJsonValue
 ) {
+  // Every file-shaped action is logged here, which makes it the one place to tell other
+  // tabs and devices that the list has moved on.
+  if (action.startsWith('file.') || action.startsWith('folder.')) publish(userId, { type: 'files.changed' });
+
   try {
     await prisma.activity.create({
       data: { user_id: userId, action, file_id: file?.id, file_name: file?.name, details },

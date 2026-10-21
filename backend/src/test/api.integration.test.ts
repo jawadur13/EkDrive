@@ -530,6 +530,48 @@ describe('insufficient storage', () => {
   });
 });
 
+describe('live updates', () => {
+  it('streams events for things that happen to this user', async () => {
+    const res = await app.request('/api/v1/events', { headers: { Authorization: `Bearer ${owner.token}` } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const read = async () => decoder.decode((await reader.read()).value);
+
+    // The stream opens with its reconnect hint.
+    expect(await read()).toContain('retry:');
+
+    const { publish } = await import('../services/events');
+    publish(owner.user.id, { type: 'files.changed' });
+    const message = await read();
+    expect(message).toContain('data: ');
+    expect(JSON.parse(message.replace('data: ', '').trim())).toEqual({ type: 'files.changed' });
+
+    await reader.cancel();
+  });
+
+  it('does not leak another user’s events', async () => {
+    const res = await app.request('/api/v1/events', { headers: { Authorization: `Bearer ${owner.token}` } });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    await reader.read(); // the retry hint
+
+    const { publish } = await import('../services/events');
+    publish(other.user.id, { type: 'files.changed' });
+    publish(owner.user.id, { type: 'drives.changed' });
+
+    const message = decoder.decode((await reader.read()).value);
+    expect(JSON.parse(message.replace('data: ', '').trim())).toEqual({ type: 'drives.changed' });
+    await reader.cancel();
+  });
+
+  it('needs a session like everything else', async () => {
+    expect((await app.request('/api/v1/events')).status).toBe(401);
+  });
+});
+
 describe('recent files', () => {
   it('lists the newest files across folders, newest first', async () => {
     const folder = (await (await api.post('/files', { name: 'Recent' })).json()) as any;

@@ -18,7 +18,8 @@ export function useDrives() {
   return useQuery({
     queryKey: ['drives'],
     queryFn: () => api.get('/drives').then((r) => r.data.drives as Drive[]),
-    refetchInterval: 60000,
+    // The server pushes drive changes; this is only a safety net if the stream is down.
+    refetchInterval: 5 * 60 * 1000,
   });
 }
 
