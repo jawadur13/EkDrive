@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuthStore } from './stores/authStore';
 
 const FileList = lazy(() => import('./pages/FileList'));
@@ -82,6 +83,7 @@ function App() {
             <Header onOpenSidebar={() => setIsSidebarOpen(true)} />
             <main id="main" className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
               <div className="max-w-7xl mx-auto">
+                <ErrorBoundary>
                 <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="flex items-center gap-2 text-gray-400"><div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /><span className="text-sm">Loading...</span></div></div>}>
                   <Routes>
                     <Route path="/" element={<Navigate to="/files" replace />} />
@@ -95,6 +97,7 @@ function App() {
                     <Route path="*" element={<Navigate to="/files" replace />} />
                   </Routes>
                 </Suspense>
+                </ErrorBoundary>
               </div>
             </main>
           </div>

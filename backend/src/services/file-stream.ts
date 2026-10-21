@@ -1,8 +1,11 @@
+import { ZipArchive } from 'archiver';
+import { Readable } from 'node:stream';
 import type { File } from '@prisma/client';
 import { prisma } from '../db/client';
 import { HttpError } from '../utils/errors';
 import { computeChecksum, createFileHasher } from './chunking';
 import { downloadChunkFromDrive } from './chunk-store';
+import { FILE_STATUS } from './files';
 
 export type ByteRange = { start: number; end: number };
 
@@ -132,4 +135,32 @@ export function fileResponseHeaders(file: File, disposition: 'attachment' | 'inl
   if (file.size_bytes !== null) headers['Content-Length'] = file.size_bytes.toString();
   if (disposition === 'inline') headers['Content-Security-Policy'] = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox";
   return headers;
+}
+
+// Folder download. Entries are stored, not deflated: the payload is usually already-compressed
+// media, and the chunks are fetched from Google one at a time as the archive pulls them.
+export async function streamFolderArchive(userId: string, folder: File): Promise<ReadableStream<Uint8Array>> {
+  const descendants = await prisma.file.findMany({
+    where: { user_id: userId, trashed_at: null, virtual_path: { startsWith: `${folder.virtual_path}/` } },
+    orderBy: { virtual_path: 'asc' },
+  });
+
+  const archive = new ZipArchive({ store: true });
+  archive.on('warning', (error: unknown) => console.warn(`Archive of folder ${folder.id}:`, error));
+  archive.on('error', (error: unknown) => console.error(`Archive of folder ${folder.id} failed:`, error));
+
+  const prefix = `${folder.virtual_path}/`;
+  for (const entry of descendants) {
+    const relativePath = entry.virtual_path.slice(prefix.length);
+    if (entry.is_folder) {
+      // Keeps empty folders in the archive.
+      archive.append(Buffer.alloc(0), { name: `${relativePath}/` });
+      continue;
+    }
+    if (entry.status !== FILE_STATUS.ready) continue;
+    archive.append(Readable.fromWeb(await streamFileContent(entry) as never), { name: relativePath });
+  }
+
+  void archive.finalize();
+  return Readable.toWeb(archive) as ReadableStream<Uint8Array>;
 }

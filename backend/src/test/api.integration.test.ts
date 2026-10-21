@@ -485,6 +485,43 @@ describe('resumable and fault-tolerant upload', () => {
   });
 });
 
+describe('folder download', () => {
+  it('streams a folder as a zip containing its files and empty subfolders', async () => {
+    const root = (await (await api.post('/files', { name: 'Trip' })).json()) as any;
+    const sub = (await (await api.post('/files', { name: 'Day 1', parentFolderId: root.id })).json()) as any;
+    await api.post('/files', { name: 'Empty', parentFolderId: root.id });
+
+    const outer = new Uint8Array(randomBytes(300));
+    const inner = new Uint8Array(randomBytes(1500));
+    await upload(api, outer, 'notes.txt', root.id);
+    await upload(api, inner, 'photo.bin', sub.id);
+
+    const res = await api.get(`/files/${root.id}/archive`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/zip');
+    expect(res.headers.get('content-disposition')).toContain('Trip.zip');
+
+    const zip = Buffer.from(await res.arrayBuffer());
+    expect(zip.subarray(0, 2).toString()).toBe('PK');
+
+    // Entry names live in the central directory; checking them proves the structure survived.
+    const asText = zip.toString('latin1');
+    expect(asText).toContain('notes.txt');
+    expect(asText).toContain('Day 1/photo.bin');
+    expect(asText).toContain('Empty/');
+    // Stored, not deflated, so the file bytes appear verbatim.
+    expect(zip.includes(Buffer.from(outer))).toBe(true);
+    expect(zip.includes(Buffer.from(inner))).toBe(true);
+  });
+
+  it('refuses an archive of something that is not a folder', async () => {
+    const { fileId } = await upload(api, new Uint8Array(randomBytes(100)), 'single.bin');
+    const res = await api.get(`/files/${fileId}/archive`);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as any).error.code).toBe('NOT_A_FOLDER');
+  });
+});
+
 describe('whole-file integrity', () => {
   it('aborts a download whose chunks no longer add up to the stored checksum', async () => {
     const data = new Uint8Array(randomBytes(1500));

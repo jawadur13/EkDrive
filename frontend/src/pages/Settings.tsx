@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import api, { getErrorMessage } from '../services/api';
 import { useDrives, useStorageMode, type Drive, type StorageModeName } from '../hooks/useDriveHealth';
 import { useAuthStore } from '../stores/authStore';
+import { ShareLinks } from '../components/ShareLinks';
 import { formatBytes, timeAgo } from '../utils/format';
 
 const MODES: Array<{ id: StorageModeName; label: string; description: string }> = [
@@ -204,6 +205,8 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      <ShareLinks onError={setError} />
 
       <div className="card">
         <div className="card-header">

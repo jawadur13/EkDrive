@@ -10,7 +10,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 |---|---|
 | Google sign-in, connecting several accounts as drives | Working |
 | Chunked upload (parallel, resumable), download, range streaming | Working |
-| Folders, search, share links, trash | Working |
+| Folders (uploaded and downloaded whole), search, share links, trash | Working |
 | Storage modes, rebalancing, self-repair | Working |
 | Drive health, change sync | Working |
 | Activity log, notifications, analytics dashboard | Working |
@@ -26,7 +26,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
   - *Balanced*: each chunk goes to the drive that stays least utilized.
   - *Maximum capacity*: each chunk goes to the drive with the most free space.
   - *High reliability*: each chunk is stored on at least two drives. Downloads fall back to another copy when one is missing or corrupt.
-- **Folders** are virtual — they exist only in EkDrive's database, so moving and renaming never touches Google Drive.
+- **Folders** are virtual — they exist only in EkDrive's database, so moving and renaming never touches Google Drive. A folder can be uploaded whole and downloaded back as a zip that is built while it streams.
 - **Trash.** Deleting moves an item to the trash for 30 days. Trashed files keep using Google space until they are purged.
 - **Self-repair.** When a chunk is deleted outside EkDrive, sync marks that copy missing, rebuilds it from another copy and notifies you. A file with no copy left is reported as damaged. `POST /api/v1/files/:id/repair` runs a repair on demand.
 - **Background jobs**: drive health every 15 minutes, change sync every 10 minutes, and a daily cleanup of abandoned uploads, expired trash, expired share links and old records. They run on timers inside the backend process; with `REDIS_URL` set they run as BullMQ repeatable jobs instead, which survives a restart mid-job and spreads the work across instances.
@@ -89,7 +89,7 @@ All routes are under `/api/v1` and need the session cookie, except `/auth/login`
 | Group | Routes |
 |---|---|
 | `auth` | `login`, `callback`, `connect`, `me`, `logout` (optionally everywhere) |
-| `files` | list, search, issues, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/preview`, `:id/repair` |
+| `files` | list, search, issues, breadcrumbs, create folder, rename/move, trash, `:id/download`, `:id/archive`, `:id/preview`, `:id/repair` |
 | `upload` | `init`, `:id/status`, `:id/chunk/:index`, `:id/complete`, abort |
 | `trash` | list, restore, delete one, empty |
 | `drives` | list, get, disconnect, health check |

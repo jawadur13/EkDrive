@@ -47,6 +47,7 @@ export default function FileList() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const [uploads, setUploads] = useState<UploadTask[]>([]);
   const [notice, setNotice] = useState<{ kind: 'error' | 'info'; text: string } | null>(null);
   const [previewing, setPreviewing] = useState<FileItem | null>(null);
@@ -94,16 +95,48 @@ export default function FileList() {
     }
   };
 
+  // A folder upload arrives as a flat list whose webkitRelativePath holds the structure, so
+  // the folders are created first and each file is sent into the one it belongs to.
+  const ensureFolders = async (paths: string[]) => {
+    const created = new Map<string, string | null>([['', folderId ?? null]]);
+    for (const path of [...new Set(paths)].sort()) {
+      const parts = path.split('/').filter(Boolean);
+      for (let i = 0; i < parts.length; i++) {
+        const key = parts.slice(0, i + 1).join('/');
+        if (created.has(key)) continue;
+        const parent = created.get(parts.slice(0, i).join('/')) ?? null;
+        const res = await api.post('/files', { name: parts[i], parentFolderId: parent });
+        created.set(key, res.data.id as string);
+      }
+    }
+    return created;
+  };
+
   const handleFiles = async (fileList: FileList | null) => {
     if (!fileList) return;
-    for (const file of Array.from(fileList)) {
+    const list = Array.from(fileList);
+    const relativeDirs = list.map((file) => (file.webkitRelativePath || '').split('/').slice(0, -1).join('/'));
+
+    let folders = new Map<string, string | null>([['', folderId ?? null]]);
+    if (relativeDirs.some(Boolean)) {
+      try {
+        folders = await ensureFolders(relativeDirs.filter(Boolean));
+      } catch (error) {
+        setNotice({ kind: 'error', text: getErrorMessage(error) });
+        return;
+      }
+      refresh();
+    }
+
+    for (const [position, file] of list.entries()) {
       const task: UploadTask = { id: crypto.randomUUID(), name: file.name, loaded: 0, total: file.size, controller: new AbortController() };
       setUploads((prev) => [...prev, task]);
       const update = (patch: Partial<UploadTask>) =>
         setUploads((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t)));
 
       try {
-        await uploadFile(file, folderId ?? null, (loaded) => update({ loaded }), task.controller.signal);
+        const destination = folders.get(relativeDirs[position]) ?? folderId ?? null;
+        await uploadFile(file, destination, (loaded) => update({ loaded }), task.controller.signal);
         setUploads((prev) => prev.filter((t) => t.id !== task.id));
         refresh();
       } catch (error) {
@@ -111,6 +144,7 @@ export default function FileList() {
       }
     }
     if (fileInput.current) fileInput.current.value = '';
+    if (folderInput.current) folderInput.current.value = '';
   };
 
   const createFolder = () => {
@@ -186,6 +220,7 @@ export default function FileList() {
         {!searchQuery && (
           <div className="flex gap-2">
             <button className="btn-secondary" onClick={createFolder}>New folder</button>
+            <button className="btn-secondary" onClick={() => folderInput.current?.click()}>Upload folder</button>
             <button className="btn-primary" onClick={() => fileInput.current?.click()}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -193,6 +228,15 @@ export default function FileList() {
               Upload
             </button>
             <input ref={fileInput} type="file" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
+            {/* webkitdirectory is how every current browser exposes picking a folder. */}
+            <input
+              ref={folderInput}
+              type="file"
+              hidden
+              multiple
+              {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+              onChange={(e) => handleFiles(e.target.files)}
+            />
           </div>
         )}
       </div>
@@ -297,7 +341,7 @@ export default function FileList() {
                       label={file.name}
                       actions={[
                         ...(file.is_folder
-                          ? []
+                          ? [{ label: 'Download as zip', href: `/api/v1/files/${file.id}/archive` }]
                           : [
                               { label: 'Download', href: getDownloadUrl(file.id) },
                               { label: 'Copy share link', onSelect: () => share(file) },
