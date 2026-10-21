@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { prisma } from '../db/client';
 import { FILE_STATUS } from '../services/files';
 import { contentDisposition, fileResponse, streamFolderArchive } from '../services/file-stream';
-import { getOrCreateThumbnail, isThumbnailable } from '../services/thumbnails';
+import { getOrCreateThumbnail } from '../services/thumbnails';
 import { HttpError, notFound } from '../utils/errors';
 
 export const downloadRoutes = new Hono();
@@ -30,8 +30,9 @@ downloadRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/archive', async (c) => {
 // back to an icon without a second round trip.
 downloadRoutes.get('/:fileId{[0-9a-fA-F-]{36}}/thumbnail', async (c) => {
   const file = await getReadyFile((c as any).get('userId'), c.req.param('fileId'));
-  if (!isThumbnailable(file)) throw notFound('Thumbnail');
 
+  // No size or type gate here: one already stored is served whatever the file looks like now,
+  // and the service decides whether a missing one is worth making.
   const thumbnail = await getOrCreateThumbnail(file);
   if (!thumbnail) throw notFound('Thumbnail');
 

@@ -119,7 +119,7 @@ backend/
   src/test/         integration tests
 frontend/src/       React + Vite SPA (pages, components, services, stores)
 plan/               original design documents
-audit/              readiness audits
+audit/              readiness audits (start with 2026-10-22-status.md)
 ```
 
 ## Running it with Docker
@@ -153,6 +153,9 @@ register `<BACKEND_URL>/api/v1/auth/callback` in Google Cloud Console.
 - Responses carry a locked-down `Content-Security-Policy` and `Permissions-Policy`; inline previews are served with their own sandboxed policy.
 
 ## Known limitations
+
+See [audit/2026-10-22-status.md](audit/2026-10-22-status.md) for the full picture of what is
+built, where it departs from the original plan, and what is still missing.
 
 - Rebalance runs inside the backend process, one at a time per user. A restart during a rebalance stops it; running it again continues where it stopped.
 - Without `REDIS_URL` the scheduled jobs live in the backend process, so they assume a single instance and a job interrupted by a restart waits for its next tick.

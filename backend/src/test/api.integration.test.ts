@@ -45,7 +45,9 @@ const jwt = (await import('jsonwebtoken')).default;
 const RUN = randomBytes(4).toString('hex');
 const userIds: string[] = [];
 
-async function createUser(label: string, driveCount: number, quota = 10_000) {
+// Each upload consumes the drive's quota for the whole run, so the pool has to comfortably
+// hold every file this suite writes. Still small enough that a 1 MB file cannot fit.
+async function createUser(label: string, driveCount: number, quota = 200_000) {
   const user = await prisma.user.create({ data: { email: `it-${RUN}-${label}@ekdrive.test`, display_name: label } });
   userIds.push(user.id);
   for (let i = 0; i < driveCount; i++) {
@@ -618,6 +620,21 @@ describe('thumbnails', () => {
     const again = await api.get(`/files/${init.fileId}/thumbnail`);
     expect(Buffer.from(await again.arrayBuffer()).equals(body)).toBe(true);
     expect(stored!.created_at).toEqual((await prisma.thumbnail.findUnique({ where: { file_id: init.fileId } }))!.created_at);
+  });
+
+  it('serves a stored thumbnail even for a file too large to generate one now', async () => {
+    const { fileId } = await upload(api, new Uint8Array(randomBytes(300)), 'huge-photo.jpg');
+    await prisma.file.update({ where: { id: fileId }, data: { mime_type: 'image/jpeg', size_bytes: 999_999_999n } });
+    await prisma.thumbnail.create({ data: { file_id: fileId, bytes: Buffer.from('fake-webp'), width: 256, height: 256 } });
+
+    const res = await api.get(`/files/${fileId}/thumbnail`);
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('fake-webp');
+
+    // The pretend size would skew the analytics totals every later test reads.
+    await prisma.thumbnail.delete({ where: { file_id: fileId } });
+    await prisma.chunk.deleteMany({ where: { file_id: fileId } });
+    await prisma.file.delete({ where: { id: fileId } });
   });
 
   it('has nothing to show for a file that is not an image', async () => {

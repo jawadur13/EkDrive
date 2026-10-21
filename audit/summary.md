@@ -1,6 +1,6 @@
 # EkDrive — Production Readiness Audit Summary
 
-> **Update 2026-09-22:** The findings below have been fixed, and the missing features are now built: Trash, Activity, Notifications, Analytics, rebalancing, self-repair and range streaming. See README → "Known limitations". Treat this document as history, not as the current state.
+> **Superseded.** This describes the state in September 2026. See [2026-10-22-status.md](./2026-10-22-status.md) for where the project actually stands; the findings below have been fixed.
 
 This document aggregates the findings from the nine module audits (01–09) into a single production-readiness verdict.
 
