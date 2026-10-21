@@ -16,7 +16,7 @@ export default defineConfig({
       include: ['src/**/*.{ts,tsx}'],
       exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/main.tsx'],
       // Set to what the suite covers today; raise them as pages gain tests.
-      thresholds: { lines: 10, functions: 45, branches: 60 },
+      thresholds: { lines: 14, functions: 55, branches: 65 },
     },
   },
 });

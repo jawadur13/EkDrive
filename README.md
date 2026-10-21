@@ -15,6 +15,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 | Drive health, change sync | Working |
 | Activity log, notifications, analytics dashboard | Working |
 | Health page: conflicts, repair, per-drive uptime history | Working |
+| Mobile layout, keyboard and screen-reader support | Basic |
 
 ## How it works
 
@@ -132,6 +133,7 @@ audit/              readiness audits
 - Without `REDIS_URL` the scheduled jobs live in the backend process, so they assume a single instance and a job interrupted by a restart waits for its next tick.
 - Moving a chunk during a rebalance can interrupt a download of that file that is already in progress.
 - Rename, new-folder and delete prompts use the browser's built-in dialogs.
+- Files are moved through a folder picker; there is no drag-and-drop and no multi-select yet.
 - The rate limiter keeps its counts in memory, so it is only correct with a single backend instance.
 - Resuming an upload matches a file by name, size and modification time, so editing a file before resuming would mix old and new chunks. Renaming it first forces a clean upload.
 

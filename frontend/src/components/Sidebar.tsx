@@ -13,17 +13,32 @@ const navItems = [
 interface SidebarProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
+  /** Small screens only: whether the drawer is showing. */
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
-export function Sidebar({ isCollapsed = false, onToggle = () => {} }: SidebarProps) {
+export function Sidebar({ isCollapsed = false, onToggle = () => {}, isOpen = false, onClose = () => {} }: SidebarProps) {
   const { user, logout } = useAuthStore();
   const initial = (user?.displayName || user?.email || '?').charAt(0).toUpperCase();
   return (
-    <aside className={`bg-white border-r border-gray-100 flex flex-col fixed inset-y-0 left-0 z-20 transition-all duration-300 ${isCollapsed ? 'w-[72px]' : 'w-60'}`}>
+    <aside
+      aria-label="Main"
+      className={`bg-white border-r border-gray-100 flex flex-col fixed inset-y-0 left-0 z-20 transition-transform duration-300 lg:transition-all ${
+        isCollapsed ? 'lg:w-[72px]' : 'lg:w-60'
+      } w-60 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+    >
+      <button
+        onClick={onClose}
+        className="absolute right-3 top-4 p-1 text-slate-400 hover:text-slate-700 lg:hidden"
+        aria-label="Close menu"
+      >
+        ✕
+      </button>
       <div className={`py-4 border-b border-gray-100 flex items-center ${isCollapsed ? 'justify-center' : 'px-5'}`}>
         <Link to="/" className="flex items-center gap-3">
           <img src="/ek-drive-logo.png" alt="EkDrive Logo" className="w-8 h-8 object-contain flex-shrink-0" />
-          {!isCollapsed && <span className="text-lg font-bold text-gray-900 tracking-tight whitespace-nowrap">EkDrive</span>}
+          <span className={`text-lg font-bold text-gray-900 tracking-tight whitespace-nowrap ${isCollapsed ? 'lg:hidden' : ''}`}>EkDrive</span>
         </Link>
       </div>
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
@@ -32,6 +47,7 @@ export function Sidebar({ isCollapsed = false, onToggle = () => {} }: SidebarPro
             <li key={item.to}>
               <NavLink
                 to={item.to}
+                onClick={onClose}
                 className={({ isActive }) =>
                   `flex items-center gap-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                     isCollapsed ? 'justify-center px-0' : 'px-3'
@@ -46,14 +62,20 @@ export function Sidebar({ isCollapsed = false, onToggle = () => {} }: SidebarPro
                 <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={item.icon} />
                 </svg>
-                {!isCollapsed && <span>{item.label}</span>}
+                <span className={isCollapsed ? 'lg:hidden' : ''}>{item.label}</span>
               </NavLink>
             </li>
           ))}
         </ul>
       </nav>
       <div className="px-3 py-3 border-t border-gray-100 flex flex-col gap-2">
-        <button onClick={onToggle} className={`flex items-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors ${isCollapsed ? 'justify-center p-2' : 'px-3 py-2 gap-3'}`} title="Toggle Sidebar">
+        <button
+          onClick={onToggle}
+          className={`hidden lg:flex items-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors ${
+            isCollapsed ? 'justify-center p-2' : 'px-3 py-2 gap-3'
+          }`}
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
           <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             {isCollapsed ? (
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 19l7-7-7-7m-8 14l7-7-7-7" />

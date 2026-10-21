@@ -5,12 +5,15 @@ import api, { getErrorMessage } from '../services/api';
 import { uploadFile } from '../services/upload';
 import { getDownloadUrl, getShareUrl } from '../services/download';
 import { canPreview, PreviewModal } from '../components/PreviewModal';
+import { MoveDialog } from '../components/MoveDialog';
+import { RowMenu } from '../components/RowMenu';
 import { formatBytes, timeAgo } from '../utils/format';
 
 interface FileItem {
   id: string;
   name: string;
   is_folder: boolean;
+  parent_id: string | null;
   mime_type: string | null;
   size_bytes: number | null;
   updated_at: string;
@@ -47,6 +50,7 @@ export default function FileList() {
   const [uploads, setUploads] = useState<UploadTask[]>([]);
   const [notice, setNotice] = useState<{ kind: 'error' | 'info'; text: string } | null>(null);
   const [previewing, setPreviewing] = useState<FileItem | null>(null);
+  const [moving, setMoving] = useState<FileItem | null>(null);
 
   const listQuery = useInfiniteQuery({
     queryKey: ['files', folderId ?? 'root'],
@@ -126,6 +130,11 @@ export default function FileList() {
     }
   };
 
+  const move = (file: FileItem, destinationId: string | null) => {
+    setMoving(null);
+    run(() => api.patch(`/files/${file.id}`, { parentFolderId: destinationId }), `Moved ${file.name}.`);
+  };
+
   const share = (file: FileItem) =>
     run(async () => {
       const res = await api.post('/shares', { fileId: file.id, permissions: 'download' });
@@ -146,6 +155,14 @@ export default function FileList() {
   return (
     <div className="space-y-6 animate-fade-in">
       {previewing && <PreviewModal file={previewing} onClose={() => setPreviewing(null)} />}
+      {moving && (
+        <MoveDialog
+          item={moving}
+          currentParentId={moving.parent_id}
+          onCancel={() => setMoving(null)}
+          onMove={(destinationId) => move(moving, destinationId)}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <nav className="flex items-center gap-1 text-xl font-bold text-slate-900 tracking-tight min-w-0">
           {searchQuery ? (
@@ -188,7 +205,7 @@ export default function FileList() {
       )}
 
       {uploads.length > 0 && (
-        <div className="card divide-y divide-slate-50">
+        <div className="card divide-y divide-slate-50" role="status" aria-live="polite">
           {uploads.map((task) => (
             <div key={task.id} className="px-6 py-3 flex items-center gap-4">
               <div className="flex-1 min-w-0">
@@ -238,41 +255,58 @@ export default function FileList() {
           </p>
         </div>
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full whitespace-nowrap">
+        <div className="card">
+          <table className="w-full">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/50">
                 <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Name</th>
-                <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Size</th>
-                <th className="text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Modified</th>
-                <th className="px-6 py-4" />
+                <th className="hidden sm:table-cell text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Size</th>
+                <th className="hidden md:table-cell text-left px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Modified</th>
+                <th className="px-2 py-4 sm:px-4"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {files.map((file) => (
                 <tr key={file.id} className="hover:bg-blue-50/40 transition-colors duration-200 group">
-                  <td className="px-6 py-3">
-                    <button onClick={() => open(file)} className="flex items-center gap-4 text-left max-w-sm">
+                  <td className="min-w-0 px-4 py-3 sm:px-6">
+                    <button onClick={() => open(file)} className="flex w-full items-center gap-3 text-left">
                       <span className="text-xl flex-shrink-0 w-9 h-9 flex items-center justify-center bg-slate-50 rounded-xl">
                         {getFileIcon(file.mime_type, file.is_folder)}
                       </span>
-                      <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-600 truncate">{file.name}</span>
-                      {file.redundancy_copies > 1 && (
-                        <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 rounded px-1.5 py-0.5">{file.redundancy_copies}× copies</span>
-                      )}
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-slate-700 group-hover:text-blue-600">
+                          {file.name}
+                          {file.redundancy_copies > 1 && (
+                            <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">
+                              {file.redundancy_copies}× copies
+                            </span>
+                          )}
+                        </span>
+                        <span className="block text-xs text-slate-400 sm:hidden">
+                          {file.is_folder ? 'Folder' : formatBytes(file.size_bytes)} · {timeAgo(file.updated_at)}
+                        </span>
+                      </span>
                     </button>
                   </td>
-                  <td className="px-6 py-3 text-sm text-slate-500 font-medium">{file.is_folder ? '—' : formatBytes(file.size_bytes)}</td>
-                  <td className="px-6 py-3 text-sm text-slate-400">{timeAgo(file.updated_at)}</td>
-                  <td className="px-6 py-3 text-right text-xs space-x-3">
-                    {!file.is_folder && (
-                      <>
-                        <a href={getDownloadUrl(file.id)} className="text-slate-500 hover:text-blue-600">Download</a>
-                        <button onClick={() => share(file)} className="text-slate-500 hover:text-blue-600">Share</button>
-                      </>
-                    )}
-                    <button onClick={() => rename(file)} className="text-slate-500 hover:text-blue-600">Rename</button>
-                    <button onClick={() => remove(file)} className="text-slate-500 hover:text-red-600">Delete</button>
+                  <td className="hidden sm:table-cell px-6 py-3 text-sm text-slate-500 font-medium">
+                    {file.is_folder ? '—' : formatBytes(file.size_bytes)}
+                  </td>
+                  <td className="hidden md:table-cell px-6 py-3 text-sm text-slate-400">{timeAgo(file.updated_at)}</td>
+                  <td className="px-2 py-3 text-right sm:px-4">
+                    <RowMenu
+                      label={file.name}
+                      actions={[
+                        ...(file.is_folder
+                          ? []
+                          : [
+                              { label: 'Download', href: getDownloadUrl(file.id) },
+                              { label: 'Copy share link', onSelect: () => share(file) },
+                            ]),
+                        { label: 'Move to…', onSelect: () => setMoving(file) },
+                        { label: 'Rename', onSelect: () => rename(file) },
+                        { label: 'Delete', onSelect: () => remove(file), danger: true },
+                      ]}
+                    />
                   </td>
                 </tr>
               ))}

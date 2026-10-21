@@ -36,6 +36,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Below lg the sidebar slides over the content instead of taking a column.
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
 
   useEffect(() => {
@@ -57,10 +59,28 @@ function App() {
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       {isAuthenticated && (
         <>
-          <Sidebar isCollapsed={isSidebarCollapsed} onToggle={() => setIsSidebarCollapsed((prev) => !prev)} />
-          <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarCollapsed ? 'ml-[72px]' : 'ml-60'}`}>
-            <Header />
-            <main className="flex-1 overflow-auto p-6 lg:p-8">
+          <Sidebar
+            isCollapsed={isSidebarCollapsed}
+            onToggle={() => setIsSidebarCollapsed((prev) => !prev)}
+            isOpen={isSidebarOpen}
+            onClose={() => setIsSidebarOpen(false)}
+          />
+          {isSidebarOpen && (
+            <div
+              className="fixed inset-0 z-10 bg-slate-900/40 lg:hidden"
+              onClick={() => setIsSidebarOpen(false)}
+              aria-hidden="true"
+            />
+          )}
+          <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-60'}`}>
+            <a
+              href="#main"
+              className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:shadow"
+            >
+              Skip to content
+            </a>
+            <Header onOpenSidebar={() => setIsSidebarOpen(true)} />
+            <main id="main" className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
               <div className="max-w-7xl mx-auto">
                 <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="flex items-center gap-2 text-gray-400"><div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /><span className="text-sm">Loading...</span></div></div>}>
                   <Routes>

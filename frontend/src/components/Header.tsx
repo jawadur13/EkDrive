@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { NotificationBell } from './NotificationBell';
 
-export function Header() {
+export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const [searchQuery, setSearchQuery] = useState('');
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,7 +29,16 @@ export function Header() {
   };
 
   return (
-    <header className="h-16 bg-white/80 backdrop-blur-md border-b border-slate-200/60 flex items-center justify-between px-6 sticky top-0 z-30 transition-all">
+    <header className="h-16 bg-white/80 backdrop-blur-md border-b border-slate-200/60 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30 transition-all">
+      <button
+        onClick={onOpenSidebar}
+        className="-ml-2 mr-1 rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
+        aria-label="Open menu"
+      >
+        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
       <div className="flex items-center gap-4 flex-1 max-w-xl">
         <form onSubmit={handleSearch} className="relative flex-1">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -39,11 +48,12 @@ export function Header() {
             ref={inputRef}
             type="text"
             placeholder="Search files..."
+            aria-label="Search files"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 text-sm bg-slate-100/50 border border-transparent rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/50 transition-all duration-300"
           />
-          <kbd className="absolute right-3 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-medium font-mono text-slate-400 bg-white border border-slate-200 rounded shadow-sm">
+          <kbd className="hidden sm:block absolute right-3 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-medium font-mono text-slate-400 bg-white border border-slate-200 rounded shadow-sm">
             ⌘K
           </kbd>
         </form>
