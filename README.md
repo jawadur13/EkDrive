@@ -155,7 +155,9 @@ register `<BACKEND_URL>/api/v1/auth/callback` in Google Cloud Console.
 ## Known limitations
 
 See [audit/2026-10-22-status.md](audit/2026-10-22-status.md) for the full picture of what is
-built, where it departs from the original plan, and what is still missing.
+built, where it departs from the original plan, and what is still missing, and
+[audit/production-readiness.md](audit/production-readiness.md) for what it would take to run
+this for real users.
 
 - Rebalance runs inside the backend process, one at a time per user. A restart during a rebalance stops it; running it again continues where it stopped.
 - Without `REDIS_URL` the scheduled jobs live in the backend process, so they assume a single instance and a job interrupted by a restart waits for its next tick.
