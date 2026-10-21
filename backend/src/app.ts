@@ -3,11 +3,11 @@ import { env } from './env';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { HTTPException } from 'hono/http-exception';
 import { authenticateUser } from './middleware/auth';
 import { requireSameOrigin } from './middleware/csrf';
+import { requestLogger } from './middleware/request-log';
 import { rateLimit } from './middleware/rate-limit';
 import { authRoutes } from './routes/auth';
 import { fileRoutes } from './routes/files';
@@ -22,6 +22,7 @@ import { trashRoutes } from './routes/trash';
 import { activityRoutes, analyticsRoutes, notificationRoutes } from './routes/insights';
 import { HttpError } from './utils/errors';
 import './utils/bigint-json';
+import { currentRequestId, logger } from './utils/logger';
 
 export const app = new Hono();
 
@@ -41,7 +42,7 @@ app.use(
   })
 );
 app.use('*', cors({ origin: env.frontendUrl, credentials: true, maxAge: 3600 }));
-if (process.env.NODE_ENV !== 'test') app.use('*', logger());
+app.use('*', requestLogger);
 
 // Before auth, so an unauthenticated flood is counted per IP.
 app.use('/api/v1/auth/*', rateLimit({ bucket: 'auth' }));
@@ -90,7 +91,7 @@ app.onError((error, c) => {
     const code = error.status === 413 ? 'PAYLOAD_TOO_LARGE' : `HTTP_${error.status}`;
     return c.json({ error: { code, message: error.message || 'Request rejected' } }, error.status);
   }
-  console.error(`Unhandled error on ${c.req.method} ${c.req.path}:`, error);
-  return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' } }, 500);
+  logger.error({ err: error, method: c.req.method, path: c.req.path }, 'Unhandled error');
+  return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong', requestId: currentRequestId() } }, 500);
 });
 

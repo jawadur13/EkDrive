@@ -3,6 +3,7 @@ import { prisma } from '../db/client';
 import { HttpError, notFound, validationError } from '../utils/errors';
 import { deleteChunkFromDrive } from './chunk-store';
 import { adjustDriveUsage } from './drives';
+import { logger } from '../utils/logger';
 
 export const FILE_STATUS = { uploading: 'uploading', ready: 'ready' } as const;
 
@@ -241,7 +242,7 @@ export async function removeFiles(ids: string[]) {
       if (chunk.upload_status === 'uploaded') await adjustDriveUsage(chunk.drive_id, -chunk.size_bytes);
     } catch (error) {
       // Leave the remote object behind rather than blocking the delete; it is only an orphan.
-      console.warn(`Could not delete chunk ${chunk.id} from drive ${chunk.drive_id}:`, error);
+      logger.warn({ err: error }, `Could not delete chunk ${chunk.id} from drive ${chunk.drive_id}`);
     }
   }
 

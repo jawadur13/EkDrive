@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
+import { logger } from '../utils/logger';
 
 export type ActivityAction =
   | 'file.uploaded'
@@ -30,7 +31,7 @@ export async function logActivity(
       data: { user_id: userId, action, file_id: file?.id, file_name: file?.name, details },
     });
   } catch (error) {
-    console.warn(`Failed to log activity ${action} for ${userId}:`, error);
+    logger.warn({ err: error }, `Failed to log activity ${action} for ${userId}`);
   }
 }
 

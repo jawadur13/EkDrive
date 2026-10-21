@@ -7,6 +7,7 @@ import { syncDrive } from '../services/sync';
 import { emptyTrash, FILE_STATUS, removeFiles, TRASH_RETENTION_DAYS } from '../services/files';
 import { notify } from '../services/notifications';
 import { WRITABLE_DRIVE_STATUSES } from '../services/drives';
+import { logger } from '../utils/logger';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,7 +34,7 @@ export const JOBS: Job[] = [
           await checkDriveHealth(id);
         } catch (error) {
           failed++;
-          console.warn(`Health check failed for drive ${id}:`, error);
+          logger.warn({ err: error }, `Health check failed for drive ${id}`);
         }
       }
       return { checked: drives.length - failed, failed };
@@ -51,7 +52,7 @@ export const JOBS: Job[] = [
           await syncDrive(drive);
         } catch (error) {
           failed++;
-          console.warn(`Sync failed for drive ${drive.id}:`, error);
+          logger.warn({ err: error }, `Sync failed for drive ${drive.id}`);
         }
       }
       return { synced: drives.length - failed, failed };
@@ -112,8 +113,7 @@ function createConnection() {
   const url = process.env.REDIS_URL;
   if (!url) return null;
   if (!/^rediss?:\/\//.test(url)) {
-    console.warn(
-      'REDIS_URL is not a redis:// or rediss:// URL (for Upstash, use the TCP URL, not the REST URL); falling back to the in-process scheduler'
+    logger.warn('REDIS_URL is not a redis:// or rediss:// URL (for Upstash, use the TCP URL, not the REST URL); falling back to the in-process scheduler'
     );
     return null;
   }
@@ -124,10 +124,10 @@ async function runJob(job: Job) {
   const startedAt = Date.now();
   try {
     const result = await job.run();
-    console.log(`job ${job.name} finished in ${Date.now() - startedAt}ms`, result);
+    logger.info({ detail: result }, `job ${job.name} finished in ${Date.now() - startedAt}ms`);
     return result;
   } catch (error) {
-    console.error(`job ${job.name} failed after ${Date.now() - startedAt}ms:`, error);
+    logger.error({ err: error }, `job ${job.name} failed after ${Date.now() - startedAt}ms`);
     throw error;
   }
 }
@@ -163,7 +163,7 @@ export function startInProcessScheduler(jobs: Job[] = JOBS): StopWorkers {
   };
 
   jobs.forEach(schedule);
-  console.log(`Background jobs scheduled in-process: ${jobs.map((j) => j.name).join(', ')}`);
+  logger.info(`Background jobs scheduled in-process: ${jobs.map((j) => j.name).join(', ')}`);
 
   return async () => {
     for (const timer of timers) clearTimeout(timer as NodeJS.Timeout);
@@ -186,8 +186,8 @@ async function startBullWorkers(connection: IORedis): Promise<StopWorkers> {
     },
     { connection, concurrency: 1 }
   );
-  worker.on('failed', (job, error) => console.error(`Job ${job?.name} failed:`, error));
-  console.log(`Background jobs scheduled on Redis: ${JOBS.map((j) => j.name).join(', ')}`);
+  worker.on('failed', (job, err) => logger.error({ err, job: job?.name }, 'Job failed'));
+  logger.info(`Background jobs scheduled on Redis: ${JOBS.map((j) => j.name).join(', ')}`);
 
   return async () => {
     await worker.close();

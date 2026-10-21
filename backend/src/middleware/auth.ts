@@ -2,6 +2,7 @@ import { env } from '../env';
 import { getCookie } from 'hono/cookie';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../db/client';
+import { setRequestUser } from '../utils/logger';
 
 export const SESSION_COOKIE = 'access_token';
 export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -47,6 +48,7 @@ export async function authenticateUser(c: any, next: any) {
     return c.json({ error: { code: 'SESSION_REVOKED', message: 'This session was signed out' } }, 401);
   }
 
+  setRequestUser(user.id);
   c.set('userId', user.id);
   c.set('user', user);
   await next();

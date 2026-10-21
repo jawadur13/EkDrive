@@ -61,6 +61,7 @@ Every variable lives in `.env.local` at the repo root; `.env.example` documents 
 | `CHUNK_SIZE_BYTES` | no | 50 MB by default |
 | `MAX_FILE_SIZE_BYTES` | no | 10 GiB by default |
 | `RATE_LIMIT_MAX`, `TRUST_PROXY` | no | Requests per minute per user (100). `TRUST_PROXY=true` only behind a proxy you control |
+| `LOG_LEVEL` | no | `info` by default; `debug` for more, `silent` in tests |
 
 ## Scripts
 
@@ -119,6 +120,7 @@ audit/              readiness audits
 - Serve the frontend and `/api` from the same site (for example, a reverse proxy that sends `/api` to the backend). The session is an HttpOnly, `SameSite=Strict` cookie, and writes are additionally checked against the `Origin` header.
 - Set `BACKEND_URL` to the public `https://` URL: that makes cookies `Secure` and sets the OAuth redirect URI.
 - Run a single backend instance, or move the rate limiter to Redis first.
+- Logs are JSON on stdout, one line per request, carrying a request id that is also returned as `X-Request-Id` and included in 500 responses. Pass your own `X-Request-Id` to trace a call end to end.
 
 ## Security notes
 

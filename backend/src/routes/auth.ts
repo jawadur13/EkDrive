@@ -11,6 +11,7 @@ import { logActivity } from '../services/activity';
 import { parseBody } from '../middleware/validation';
 import { z } from 'zod';
 import { SESSION_COOKIE, SESSION_TTL_SECONDS } from '../middleware/auth';
+import { logger } from '../utils/logger';
 
 export const authRoutes = new Hono();
 
@@ -135,7 +136,7 @@ authRoutes.get('/callback', async (c) => {
     return c.redirect(`${env.frontendUrl}/files`);
   } catch (error) {
     if (error instanceof DriveOwnershipError) return fail('drive_in_use');
-    console.error('OAuth callback failed:', error);
+    logger.error({ err: error }, 'OAuth callback failed:');
     return fail('auth_failed');
   }
 });

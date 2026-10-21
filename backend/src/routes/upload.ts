@@ -13,6 +13,7 @@ import { buildVirtualPath, FILE_STATUS, removeFiles, resolveParentFolder, unique
 import { getStorageMode } from '../services/storage-mode';
 import { HttpError, notFound } from '../utils/errors';
 import { logActivity } from '../services/activity';
+import { logger } from '../utils/logger';
 
 export const uploadRoutes = new Hono();
 
@@ -149,7 +150,7 @@ async function storeReplica(fileId: string, chunkIndex: number, replica: ChunkWi
   try {
     return await attempt(replica.drive);
   } catch (error) {
-    console.warn(`Chunk ${chunkIndex} of ${fileId} could not be stored on drive ${replica.drive_id}:`, error);
+    logger.warn({ err: error }, `Chunk ${chunkIndex} of ${fileId} could not be stored on drive ${replica.drive_id}`);
   }
 
   // The drive that just refused is excluded too, or the fallback picks it straight back.
@@ -161,10 +162,10 @@ async function storeReplica(fileId: string, chunkIndex: number, replica: ChunkWi
 
   try {
     const driveId = await attempt(fallback);
-    console.log(`Chunk ${chunkIndex} of ${fileId} moved to drive ${driveId} after a failure`);
+    logger.info(`Chunk ${chunkIndex} of ${fileId} moved to drive ${driveId} after a failure`);
     return driveId;
   } catch (error) {
-    console.error(`Fallback drive ${fallback.id} also refused chunk ${chunkIndex} of ${fileId}:`, error);
+    logger.error({ err: error }, `Fallback drive ${fallback.id} also refused chunk ${chunkIndex} of ${fileId}`);
     await prisma.chunk.update({ where: { id: replica.id }, data: { upload_status: 'failed', updated_at: new Date() } });
     return null;
   }

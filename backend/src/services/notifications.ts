@@ -1,4 +1,5 @@
 import { prisma } from '../db/client';
+import { logger } from '../utils/logger';
 
 export type NotificationInput = {
   type: 'drive.offline' | 'drive.degraded' | 'drive.recovered' | 'chunks.missing' | 'file.damaged' | 'repair.done' | 'rebalance.done' | 'trash.purged';
@@ -27,7 +28,7 @@ export async function notify(userId: string, input: NotificationInput) {
       data: { user_id: userId, type: input.type, severity: input.severity ?? 'info', title: input.title, body: input.body },
     });
   } catch (error) {
-    console.warn(`Failed to create notification for ${userId}:`, error);
+    logger.warn({ err: error }, `Failed to create notification for ${userId}`);
     return null;
   }
 }

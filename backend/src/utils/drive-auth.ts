@@ -3,6 +3,7 @@ import { google, drive_v3, type Auth } from 'googleapis';
 import type { Drive } from '@prisma/client';
 import { prisma } from '../db/client';
 import { decrypt, encrypt } from './crypto';
+import { logger } from './logger';
 
 export const GOOGLE_SCOPES = ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.file'];
 
@@ -40,7 +41,7 @@ export function getDriveOAuthClient(drive: Pick<Drive, 'id' | 'oauth_token_encry
           token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
         },
       })
-      .catch((error) => console.error(`Failed to persist refreshed token for drive ${drive.id}:`, error));
+      .catch((err) => logger.error({ err, driveId: drive.id }, 'Failed to persist a refreshed token'));
   });
 
   return client;

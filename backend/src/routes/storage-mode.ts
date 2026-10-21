@@ -6,6 +6,7 @@ import { logActivity } from '../services/activity';
 import { notify } from '../services/notifications';
 import { isRebalancing, runExclusiveRebalance } from '../services/replication';
 import { HttpError } from '../utils/errors';
+import { logger } from '../utils/logger';
 
 export const storageModeRoutes = new Hono();
 
@@ -60,7 +61,7 @@ storageModeRoutes.post('/rebalance', (c) => {
         }`,
       });
     })
-    .catch((error) => console.error(`Rebalance failed for ${userId}:`, error));
+    .catch((error) => logger.error({ err: error, userId }, 'Rebalance failed'));
 
   return c.json({ running: true }, 202);
 });

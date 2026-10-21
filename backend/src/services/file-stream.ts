@@ -6,6 +6,7 @@ import { HttpError } from '../utils/errors';
 import { computeChecksum, createFileHasher } from './chunking';
 import { downloadChunkFromDrive } from './chunk-store';
 import { FILE_STATUS } from './files';
+import { logger } from '../utils/logger';
 
 export type ByteRange = { start: number; end: number };
 
@@ -70,7 +71,7 @@ export async function streamFileContent(file: File, range?: ByteRange | null): P
         if (fileHasher && index >= file.chunk_count) {
           const digest = fileHasher.digest();
           if (digest !== file.checksum) {
-            console.error(`File ${file.id} failed its whole-file checksum: expected ${file.checksum}, got ${digest}`);
+            logger.error(`File ${file.id} failed its whole-file checksum: expected ${file.checksum}, got ${digest}`);
             controller.error(new Error('File failed its integrity check'));
             return;
           }
@@ -96,7 +97,7 @@ export async function streamFileContent(file: File, range?: ByteRange | null): P
           lastError = error;
         }
       }
-      console.error(`All copies of chunk ${index} of file ${file.id} failed:`, lastError);
+      logger.error({ err: lastError }, `All copies of chunk ${index} of file ${file.id} failed`);
       controller.error(new Error(`Chunk ${index} could not be read from any drive`));
     },
   });
@@ -146,8 +147,8 @@ export async function streamFolderArchive(userId: string, folder: File): Promise
   });
 
   const archive = new ZipArchive({ store: true });
-  archive.on('warning', (error: unknown) => console.warn(`Archive of folder ${folder.id}:`, error));
-  archive.on('error', (error: unknown) => console.error(`Archive of folder ${folder.id} failed:`, error));
+  archive.on('warning', (err: unknown) => logger.warn({ err, folderId: folder.id }, 'Archive warning'));
+  archive.on('error', (err: unknown) => logger.error({ err, folderId: folder.id }, 'Archive failed'));
 
   const prefix = `${folder.virtual_path}/`;
   for (const entry of descendants) {
