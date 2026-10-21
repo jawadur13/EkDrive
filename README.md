@@ -33,6 +33,7 @@ Working prototype — feature-complete for the flows below, not yet hardened for
 - **Trash.** Deleting moves an item to the trash for 30 days. Trashed files keep using Google space until they are purged.
 - **Drive states.** `online`, `degraded` (nearly full), `quota_exceeded` (full), `reconnecting` (Google refused the stored credentials — use Reconnect in Settings) and `offline`. Only the first two take new chunks.
 - **Self-repair.** When a chunk is deleted outside EkDrive, sync marks that copy missing, rebuilds it from another copy and notifies you. A file with no copy left is reported as damaged. `POST /api/v1/files/:id/repair` runs a repair on demand.
+- **Transient Google failures are retried.** A throttled or failing Drive call (429, 5xx, a dropped connection) is retried up to four times with exponential backoff, honouring `Retry-After`. A refusal that retrying cannot fix is surfaced at once.
 - **Live updates.** The open page subscribes to `/api/v1/events`, a server-sent stream, so a background sync, a drive going offline or a finished rebalance shows up without the user refreshing. Polling stays as a slow fallback.
 - **Background jobs**: drive health every 15 minutes, change sync every 10 minutes, and a daily cleanup of abandoned uploads, expired trash, expired share links and old records. They run on timers inside the backend process; with `REDIS_URL` set they run as BullMQ repeatable jobs instead, which survives a restart mid-job and spreads the work across instances.
 

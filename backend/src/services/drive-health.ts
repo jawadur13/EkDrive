@@ -1,5 +1,6 @@
 import { prisma } from '../db/client';
 import { getDriveApi } from '../utils/drive-auth';
+import { withGoogleRetry } from '../utils/google-retry';
 import { DRIVE_STATUS, quotaFromAbout } from './drives';
 import { notify } from './notifications';
 import { publish } from './events';
@@ -18,7 +19,9 @@ export async function checkDriveHealth(driveId: string) {
 
   try {
     // The client refreshes an expired access token on its own and persists the new one.
-    const about = await getDriveApi(drive).about.get({ fields: 'storageQuota(limit,usage)' });
+    const about = await withGoogleRetry('about.get', () =>
+      getDriveApi(drive).about.get({ fields: 'storageQuota(limit,usage)' })
+    );
     quota = quotaFromAbout(about.data.storageQuota);
     if (quota.total_quota_bytes) {
       const free = Number(quota.available_quota_bytes) / Number(quota.total_quota_bytes);
