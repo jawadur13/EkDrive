@@ -50,11 +50,17 @@ pnpm dev                          # backend :3000, frontend :5173
 
 In Google Cloud Console: enable the Google Drive API, add `http://localhost:5173` as an authorized JavaScript origin, and add `<BACKEND_URL>/api/v1/auth/callback` as an authorized redirect URI. EkDrive requests only the `drive.file` scope, so it can see only the files it created.
 
+`JWT_SECRET`, `ENCRYPTION_KEY` and `ENCRYPTION_SALT` need values of your own. Generate each one separately:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
 If port 3000 is taken, set `PORT` and `BACKEND_URL` in `.env.local` (for example 3100). The Vite dev proxy reads `BACKEND_URL` from there, so nothing else changes — but the redirect URI in Google Cloud Console has to match the new `BACKEND_URL`.
 
 ## Configuration
 
-Every variable lives in `.env.local` at the repo root; `.env.example` documents each one.
+Every variable lives in `.env.local` at the repo root. `.env.example` covers the ones you are likely to set; the table below lists them all, including `MAX_FILE_SIZE_BYTES` and `LOG_LEVEL`, which are left out of the example.
 
 | Variable | Required | Notes |
 |---|---|---|
